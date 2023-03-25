@@ -1,0 +1,134 @@
+---
+header-includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhead[CO,CE]{Hair Parra}
+  - \fancyfoot[CO,CE]{Notes by Hair Parra}
+  - \fancyfoot[LE,RO]{\thepage}
+title: "TP2 Risk Management"
+author: 'TP2: Hair Parra , Alessio Bressan, Ioan Catalin'
+date: "`r Sys.Date()`"
+geometry: margin=1.28cm
+output: 
+    pdf_document: 
+      extra_dependencies: ["array", "amsmath","booktabs"]
+---
+
+<!--These are definitions of Latex Environments--> 
+\newtheorem{assumption}{Assumption}[assumption]
+\newtheorem{theorem}{Theorem}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{example}{Example}
+\newtheorem{remark*}{Remark}
+\newtheorem{exercise*}{Exercise}
+
+
+```{r setup, include=FALSE}
+# additional setup options
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=9, fig.height=6) 
+
+# configurations for plot 
+my_plot_hook <- function(x, options)
+  paste("\n", knitr::hook_plot_tex(x, options), "\n")
+knitr::knit_hooks$set(plot = my_plot_hook)
+```
+
+### Libraries 
+
+```{r, message=FALSE, echo=FALSE}
+# Preload R libraries we will use 
+library(here)
+library(xts) 
+library(zoo)
+library(quantmod)
+```
+
+
+# Risk Management: Estimating the Risk of a Book of European Options 
+
+The objective is to implement (part of) the risk management framework for estimating the risk of a book of European call options by taking into account the risk drivers such as underlying and implied volatility.
+
+### Data 
+
+Load the database Market. Identify the price of the **SP500**, the **VIX index**, the term structure of interest rates (current and past), and the traded options (calls and puts).
+
+```{r}
+# load dataset into environment
+load(file = here("data_raw", "Market.rda"))
+
+# reassign name and inspect structure of loaded data 
+mkt <- Market 
+summary(mkt)
+```
+
+```{r}
+str(mkt)
+```
+
+Let's unpack these into the env. individually: 
+
+```{r}
+# unpack each of the elements in the mkt list
+sp500 <- mkt$sp500
+vix <- mkt$vix 
+Rf <- mkt$rf # risk-free rates
+calls <- mkt$calls 
+puts <- mkt$puts 
+
+# assign colname for aesthetic
+colnames(sp500) <- "sp500"
+colnames(vix) <- "vix"
+```
+
+**SP500 and VIX** 
+
+By inspection, we observe that we the SP500 and VIX indices are contained in the `sp500` and `vix` xts objects respectively. 
+
+```{r}
+# show head of both indexes 
+head(sp500) 
+head(vix)
+```
+
+**Interest Rates** 
+
+The **interest rates** are given in the `$rf` attribute. We can see that 
+
+```{r}
+Rf
+```
+
+We see that these are the yearly risk-free rates, yearly. 
+
+**Calls** 
+
+The `calls` object displays the different values of $K$ (**Strike Price**), $\tau$ (**maturity**) and $\sigma = IV$ (**Implied Volatilty**)
+
+```{r}
+dim(calls)
+head(calls)
+```
+
+**Puts** 
+
+```{r}
+dim(puts)
+head(puts)
+```
+
+
+### Pricing a Portfolio of Options 
+
+Assume the following book of European Call Options: 
+
+1. 1x strike $K=1600$, with maturity $T=20d$ 
+(**TO COMPLETE**)
+
+
+
