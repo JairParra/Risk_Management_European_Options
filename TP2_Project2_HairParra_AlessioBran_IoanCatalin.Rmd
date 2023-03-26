@@ -5,13 +5,12 @@ header-includes:
   - \usepackage{amsthm}
   - \usepackage{fancyhdr}
   - \pagestyle{fancy}
-  - \fancyhead[CO,CE]{Hair Parra}
-  - \fancyfoot[CO,CE]{Notes by Hair Parra}
+  - \fancyfoot[CO,CE]{Hair Parra, Alessio Bessan, Ioan Catalin}
   - \fancyfoot[LE,RO]{\thepage}
 title: "TP2 Risk Management"
 author: 'TP2: Hair Parra , Alessio Bressan, Ioan Catalin'
 date: "`r Sys.Date()`"
-geometry: margin=1.28cm
+geometry: margin=1.3cm
 output: 
     pdf_document: 
       extra_dependencies: ["array", "amsmath","booktabs"]
@@ -37,6 +36,9 @@ knitr::opts_chunk$set(fig.width=9, fig.height=6)
 my_plot_hook <- function(x, options)
   paste("\n", knitr::hook_plot_tex(x, options), "\n")
 knitr::knit_hooks$set(plot = my_plot_hook)
+
+# numeric format 
+options("scipen" = 10)
 ```
 
 ### Libraries 
@@ -50,11 +52,11 @@ library(quantmod)
 ```
 
 
-# Risk Management: Estimating the Risk of a Book of European Options 
+# Risk Management: European Options Portfolio
 
 The objective is to implement (part of) the risk management framework for estimating the risk of a book of European call options by taking into account the risk drivers such as underlying and implied volatility.
 
-### Data 
+## Data 
 
 Load the database Market. Identify the price of the **SP500**, the **VIX index**, the term structure of interest rates (current and past), and the traded options (calls and puts).
 
@@ -103,16 +105,73 @@ The **interest rates** are given in the `$rf` attribute. We can see that
 ```{r}
 Rf
 ```
+These represent the interest rates at different maturities. The maturities are given as follows:
 
-We see that these are the yearly risk-free rates, yearly. 
+```{r}
+r_f <- as.vector(Rf)
+names(r_f) <- c("1d","1w", "1m", "2m", "3m", "6m", "9m", "1y", "3y", "4y", "5y", "7y","10y", "30y")
+r_f
+```
+
+Further, we can pack different sources of information in a matrix: 
+
+```{r}
+# pack Rf into a matrix with rf, years, and days
+rf_mat <- as.matrix(r_f)
+rf_mat <- cbind(rf_mat, as.numeric(names(Rf)))
+rf_mat <- cbind(rf_mat, rf_mat[, 2]*360)
+colnames(rf_mat) <- c("rf", "years", "days") 
+rf_mat
+```
+
+```{r, echo=FALSE}
+# turn into dataframe
+rf_df <- data.frame(rf_mat)
+rf_df$years2 <- rf_df$years**2 
+rf_df$years3 <- rf_df$years**3
+
+# perform linear regresison 
+rf_lm <- lm(rf ~ 1 + years + years2 + years3, data = rf_df)
+
+# obtain predictions
+preds <- predict(rf_lm)
+
+# extract index 
+x <- rf_df$years
+ix  <- sort(x, index.return=T)$ix
+
+# 
+plot(x, rf_df$rf, 
+     main="Term Structure of Risk-Free Rates", 
+     xlab = "Years", 
+     ylab="Rf", 
+     col="blue",
+     type="p",
+     pch=16, 
+     cex=1.2
+     )
+
+# add polynomial curve to plot 
+lines(x[ix], preds[ix], col='black', lwd=2)
+grid()
+```
+
 
 **Calls** 
 
-The `calls` object displays the different values of $K$ (**Strike Price**), $\tau$ (**maturity**) and $\sigma = IV$ (**Implied Volatilty**)
+The `calls` object displays the different values of $K$ (**Strike Price**), $\tau$ (**time to maturity**) and $\sigma = IV$ (**Implied Volatilty**)
 
 ```{r}
 dim(calls)
 head(calls)
+```
+Add `days` column for convenience: 
+
+```{r}
+calls <- cbind(calls, calls[, "tau"]*250)
+colnames(calls) <- c("K","tau", "IV", "tau_days")
+head(calls)
+tail(calls)
 ```
 
 **Puts** 
@@ -122,13 +181,313 @@ dim(puts)
 head(puts)
 ```
 
+```{r}
+puts <- cbind(puts, puts[, "tau"]*250)
+colnames(puts) <- c("K","tau", "IV", "tau_days")
+head(puts)
+tail(puts)
+```
 
-### Pricing a Portfolio of Options 
+## Pricing a Portfolio of Options 
 
-Assume the following book of European Call Options: 
+### Black-Scholes 
 
-1. 1x strike $K=1600$, with maturity $T=20d$ 
-(**TO COMPLETE**)
+Notation: 
+
+- $S_t$ = Current value of underlying asset price
+- $K$ = Options **strike price** 
+- $T$ = Option **maturity** (in years) 
+- $t$ = **time** in years
+- $\tau$ = $T-t$ = **Time to maturity** 
+- $r$ = **Risk-free rate** 
+- $y$ **Dividend yield**
+- $R$ = $r-y$ 
+- $\sigma$ = **Implied volatility** 
+- $c$ = **Price Call Option** 
+- $p$ = **Price Put Option** 
+
+\begin{proposition}[Black-Scholes Model] 
+Assume the notation before, and let $N(\cdot)$ be the cumulative standard normal distribution function. Under certain assumptions, the Black-Scholes models prices Call and Put options as follows: 
+$$
+\begin{cases}
+C(S_t, t) = Se^{yT} N(d_1) - Ke^{-r \times \tau} N(d_2), \\ 
+\; \\
+P(S_t, t) = Ke^{-r \times \tau}(1 - N(d_2))  - Se^{y \times T}(1-N(d_1)), 
+\end{cases}
+$$
+
+where: 
+$$
+\begin{cases} 
+d_1 = \dfrac{\ln\left( \dfrac{S_t}{K} \right) + \tau\left( r + \dfrac{\sigma^2}{2}  \right)}{\sigma \sqrt{\tau}} \\ 
+d_2 = d_1 - \sigma \sqrt{\tau} \\ 
+\end{cases}
+$$
+, further the Put Option price corresponds to the **Put-Call parity**, given by: 
+
+$$
+C(S_t, t) + Ke^{-r \times \tau} = P(S_t, t) + S_{t}
+$$
+
+\end{proposition}
+
+**Note** As here we don't have dividends, then $y=0$, and so 
+
+$$
+\begin{cases}
+C(S_t, t) = S_tN(d_1) - Ke^{-r \times \tau} N(d_2), \\ 
+\; \\
+P(S_t, t) = Ke^{-r \times \tau}(1 - N(d_2))  - S_t(1-N(d_1)), 
+\end{cases}
+$$
+
+### Implementation 
+
+```{r}
+get_d1 <- function(S_t, K, tau, r, sigma){ 
+  ### Compute d1 for the Black-Scholes model 
+  # INPUTS
+  #   S_t:  Current value of underlying asset price
+  #   K:    Strike Price
+  #   tau:  T- t, where T=maturity, and t=current time
+  #   r:    risk-free rate 
+  #   sigma   Implied volatility (i.e. sigma)
+  
+  num <- (log(S_t/K) - tau*(r + 0.5*sigma**2)) # numerator
+  denom <- sigma * sqrt(tau) # denominator 
+  
+  return(num/denom)
+}
+
+get_d2 <- function(d1, sigma, tau){
+  ### Compute d2 for the Black-Scholes model 
+  # INPUTS
+  #   d1:  d1 factor calculated by the get_d1 function
+  #   tau:  T- t, where T=maturity, and t=current time
+  #   sigma   Implied volatility (i.e. sigma)
+  
+  return(d1 - sigma * sqrt(tau))
+}
+
+# Function to implement the Black-Scholes model 
+black_scholes <- function(S_t, K, r, tau, sigma, put=FALSE){
+  # Calculates a Call (or Option) price using Black-Scholes
+  # INPUTS
+  #   S_t:     [numeric] Current value of underlying asset price
+  #   K:       [numeric] Strike Price
+  #   r:       [numeric] risk-free rate 
+  #   tau:     [numeric] T- t, where T=maturity, and t=current time
+  #   sigma:   [numeric] Implied volatility (i.e. sigma)
+  #   put:     [logical] if TRUE, calculate a Put, if FALSE, calculate a Call. 
+  #            FALSE by default (Call). 
+  # 
+  # OUTPUTS: 
+  #   P or C: [numeric] Option value according to Black-scholes
+  
+  # calculate d1 & d2
+  d1 <- get_d1(S_t, K, tau, r, sigma)
+  d2 <- get_d2(d1, sigma, tau)
+  
+  if(put==TRUE){ 
+    # calculate a Put option 
+    P <- S_t * pnorm(d1) - K*exp(r*tau) * pnorm(d2)
+    P <- as.numeric(P)
+    return(P)
+  }
+  # else calculate a Call option (default) 
+  C <- K*exp(r*tau)*(1 - pnorm(d2)) - S_t * (1 - pnorm(d1))
+  return( as.numeric(C) )
+}
+
+# Test: Call Option 
+S_t = 100
+K = 1600 
+r = 0.03
+tau = 10/360 
+sigma = 1.05
+black_scholes(S_t, K, r, tau, sigma)
+```
+
+## Book of Options
+
+Assume the following book of **European Call Options:** 
+
+1. **1x** strike $K=1600$ with maturity $T=20d$ 
+2. **1x** strike $K=1605$ with maturity $T=40d$
+3. **1x** strike $K=1800$ with maturity $T=40d$ 
+
+Find the price of this book given **the last underlying price** and the **last implied volatility** (take the VIX for all options). Use **Black-Scholes** to price the options. Take the current term structure and **linearly interpolate** to find the corresponding rates. Use 360 days/year for the term structure and **250 days/year** for the maturity of the options. 
+
+### Nearest values 
+
+This function will obtain the two nearest values $a, b$ for a number $x$ in a vector $v$, such that $a<x<b$. 
+
+```{r}
+# Obtain the two nearest values of x in vec.
+get_nearest<- function(x, vec){ 
+  # find all the numbers that are bigger and smaller than x in vec 
+  bigger <- vec >= x 
+  smaller <- vec <= x
+  
+  # filter only values with TRUE 
+  bigger <- bigger[bigger == TRUE]
+  smaller <- smaller[smaller == TRUE]
+  
+  # obtain the indexes for the left and upper bound
+  a_idx <- length(smaller)
+  b_idx <- length(smaller)+1
+  
+  # retrieve values from original vector 
+  a <- vec[a_idx]
+  b <- vec[b_idx]
+  
+  # return the retrieved values 
+  return( c(a,b) )
+}
+
+# Test 
+days <- rf_mat[, "days"]
+get_nearest(40, rf_mat[, "days"]) # nearest day values 
+```
+
+### Linear Interpolation
+
+Given two known values $(x_1, y_1)$ and $(x_2, y_2)$, we can estimate the $y$-value for some $x$-value with:
+
+$$
+y = y_1 + \dfrac{(x-x_1)(y_2-y_1)}{(x_2-x_1)}
+$$
+
+```{r}
+# Function to interpolate y given two points
+interpolate <- function(x,x1=1,y1=1,x2=2,y2=2){
+  y1 + (x-x1)*(y2-y1)/(x2-x1)
+}
+```
+
+
+### Finding the rates through interpolation 
+
+The **yield curve** for the given structure of interest rates can be modeled a function $r_f = f(x)$ ,where $x$ is the number of years. Then, we can interapolate the values as follows: 
+
+```{r}
+# Interest rates
+rf_mat
+```
+
+```{r}
+head(calls)
+```
+
+ex.: **1x** strike $K=1600$ with maturity $T=20d$ 
+
+```{r}
+price_option <- function(T, K, calls, rf_mat, stock=NA, put=FALSE){ 
+  # Calculates
+  # INPUTS
+  #   T:        [numeric] maturity of option (in days)
+  #   K:        [numeric] Strike Price
+  #   calls:    [matrix] matrix containing information about tau and IV for different strike prices
+  #   rf_mat:       [matrix] matrix containing risk-free term structure
+  #   stock:     [xts OR zoo like object] object containing stock prices for a single stock
+  #   put:     [logical] if TRUE, calculate a Put, if FALSE, calculate a Call. 
+  #            FALSE by default (Call). 
+  # 
+  # OUTPUTS: 
+  #   LIST containing: 
+  #     - P or C: [numeric] Option value according to Black-scholes and available information
+  #     - r_interp: [numeric] Interpolated risk-free rate given risk-free term structure
+  #     - calls [matrix] relevant set of calls information 
+  #     - rates [matrix] relevant set of risk-free rates used for the interpolation
+  
+  # Inputs
+  tau = T/250 # days --> years 
+  days_calls <- calls[,"tau_days"] # extract days column
+  days_rf <- rf_mat[, "days"] # extract days from rf_mat
+  
+  # extract the calls values 
+  ab <- get_nearest(T, days_calls) # search lower and upper nearest days to T
+  valid_days <- calls[, "tau_days"] == ab[1] | calls[, "tau_days"] == ab[2] # where match
+  calls_sub <- calls[ valid_days,  ] # subset valid rows
+  calls_sub <- calls_sub[calls_sub[,"K"]==K, ] # subset matching K 
+  
+  # test whether matrix is empty (i.e. no matching K found)
+  if(all(is.na(calls_sub))){
+    warning("No values matching K in Calls data\n")
+  }
+
+  # extract interpolated risk rates 
+  ab <- get_nearest(T, days_rf) # obtain nearest days to T available in rf_mat 
+  valid_days_rf <- rf_mat[, "days"] == ab[1] | rf_mat[, "days"] == ab[2] # where match
+  rates <- rf_mat[valid_days_rf, ] # subset for valid days 
+
+  # interpolate risk free rate for Option given maturity 
+  r <- interpolate(tau, 
+                   x1=rates[1,2], 
+                   y1=rates[1,1], 
+                   x2=rates[2,2], 
+                   y2=rates[2,1])
+
+  # retrieve implied volatility for option 
+  if(is.matrix(calls_sub)){
+    # average between lower and upper values 
+    sigma <- (calls_sub[1, "IV"] + calls_sub[2, "IV"])/2
+    
+  } else{
+    # retrive from numeric vector (single match)
+    sigma <- calls_sub["IV"]
+  }
+  
+  # retrieve last price for option from VIx
+  S_t <- as.numeric( stock[length(stock)])
+  
+  # Calculate Option price 
+  if(put==TRUE){
+    C <- NA
+    P <- black_scholes(S_t, K, r, tau, sigma, put=TRUE)
+  }
+  else{ 
+    C <- black_scholes(S_t, K, r, tau, sigma, put=FALSE)
+    P <- NA
+  }
+  
+  # pack everything into a List and return 
+  return(list(Call = C, 
+              Put = P, 
+              r_interp = r, 
+              calls = calls_sub, # subset of calls used
+              rates = rates # subset of rates used 
+              ))
+}
+```
+
+Next, using the function above we price the book of options given: 
+
+1. **1x** strike $K=1600$ with maturity $T=20d$ 
+2. **1x** strike $K=1605$ with maturity $T=40d$
+3. **1x** strike $K=1800$ with maturity $T=40d$ 
+
+```{r}
+# First Call Option 
+price_option(T=20, K=1600, calls, rf_mat, stock = vix)
+```
+```{r}
+# Second Call Option 
+price_option(T=40, K=1605, calls, rf_mat, stock = vix)
+```
+
+```{r}
+# Third Call Option 
+price_option(T=40, K=1800, calls, rf_mat, stock = vix)
+```
+
+
+
+
+
+
+
+
 
 
 
