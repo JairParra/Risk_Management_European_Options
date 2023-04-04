@@ -469,16 +469,17 @@ Next, using the function above we price the book of options given:
 
 ```{r}
 # First Call Option 
-price_option(T=20, K=1600, calls, rf_mat, stock = vix)
+price_option(T=20, K=1600, calls, rf_mat, stock = sp500)
 ```
+
 ```{r}
 # Second Call Option 
-price_option(T=40, K=1605, calls, rf_mat, stock = vix)
+price_option(T=40, K=1605, calls, rf_mat, stock = sp500)
 ```
 
 ```{r}
 # Third Call Option 
-price_option(T=40, K=1800, calls, rf_mat, stock = vix)
+price_option(T=40, K=1800, calls, rf_mat, stock = sp500)
 ```
 
 
