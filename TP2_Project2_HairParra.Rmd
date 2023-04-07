@@ -49,6 +49,10 @@ library(here)
 library(xts) 
 library(zoo)
 library(quantmod)
+
+# # additional source code 
+# source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
+# source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
 ```
 
 
@@ -482,11 +486,49 @@ price_option(T=40, K=1605, calls, rf_mat, stock = sp500)
 price_option(T=40, K=1800, calls, rf_mat, stock = sp500)
 ```
 
+## Two risk drivers and copula-marginal model (Student-t and Gaussian Copula) 
+
+1. Compute the daily log-returns of the underlying stock 
+2. Assume the first invariant is generated using a Student-t distribution with $\nu=10$ df and the second invariant is generated using a Student-t distribution with $\nu=5$ df.
+3. Assume the **normal copula** to merge the marginals. 
+4. Generate 10000 scenarios for the one-week ahead price and the one-week ahead VIX value using the copula. 
+5. Determine the P&L distribution of the book of options, using the simulated values. 
+6. Take interpolated rates for the term structure.  
+
+### Gaussian Copula 
+
+A bivariate distribution $H$ can be formed via a copula $C$ from two marginal distributions with CDFs $F$ and $G$ via:
+
+$$
+H(x,y) = C(F(x), G(y))
+$$
+
+with density 
+
+$$
+h(x,y) = c(F(x), G(y))f(x)g(y)
+$$
+
+The **Gaussian Copula** is given by: 
+
+$$
+C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(\Phi^{-1}(u), \Phi^{-1}(v)).
+$$
+
+In this case, instead of Gaussian marginals, we will use two Student-t distributions as marginals, say $t_{}$
 
 
+### Log-returns 
 
+```{r, message=FALSE}
+# load reqruired libraries 
+library("PerformanceAnalytics")
 
-
+# calculate returns
+rets <- 100 * PerformanceAnalytics::CalculateReturns(sp500, method="log")
+rets <- rets[rowSums(is.na(rets)) == 0,] # remove nas 
+head(rets)
+```
 
 
 
