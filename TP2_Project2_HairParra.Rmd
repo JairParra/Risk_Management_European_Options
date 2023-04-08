@@ -50,9 +50,10 @@ library(xts)
 library(zoo)
 library(quantmod)
 
-# # additional source code 
-# source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
-# source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
+# additional source code
+source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
+source(here("code", "StudentCopulaPdf.R")) # compute the pdf of a normal copula
+source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
 ```
 
 
@@ -102,6 +103,15 @@ head(sp500)
 head(vix)
 ```
 
+```{r fig.height=8, fig.width=8, fig.align='center'}
+par(mfrow = c(2,1)) 
+
+# plot both series on top of each other 
+plot(sp500) 
+plot(vix)
+```
+
+
 **Interest Rates** 
 
 The **interest rates** are given in the `$rf` attribute. We can see that 
@@ -113,7 +123,7 @@ These represent the interest rates at different maturities. The maturities are g
 
 ```{r}
 r_f <- as.vector(Rf)
-names(r_f) <- c("1d","1w", "1m", "2m", "3m", "6m", "9m", "1y", "3y", "4y", "5y", "7y","10y", "30y")
+names(r_f) <- c("1d","1w", "1m", "3m", "6m", "9m", "1y", "2y", "3y", "4y", "5y", "7y","10y", "30y")
 r_f
 ```
 
@@ -386,7 +396,7 @@ head(calls)
 ex.: **1x** strike $K=1600$ with maturity $T=20d$ 
 
 ```{r}
-price_option <- function(T, K, calls, rf_mat, stock=NA, put=FALSE){ 
+price_option <- function(T, K, calls, rf_mat, stock=NA, S_t=NA, IV = NA, put=FALSE){ 
   # Calculates
   # INPUTS
   #   T:        [numeric] maturity of option (in days)
@@ -394,6 +404,8 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, put=FALSE){
   #   calls:    [matrix] matrix containing information about tau and IV for different strike prices
   #   rf_mat:       [matrix] matrix containing risk-free term structure
   #   stock:     [xts OR zoo like object] object containing stock prices for a single stock
+  #   S_t:      [numeric] Specific price at time t 
+  #   IV:    [float] Implied volatility of the underlying 
   #   put:     [logical] if TRUE, calculate a Put, if FALSE, calculate a Call. 
   #            FALSE by default (Call). 
   # 
@@ -432,18 +444,31 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, put=FALSE){
                    x2=rates[2,2], 
                    y2=rates[2,1])
 
-  # retrieve implied volatility for option 
-  if(is.matrix(calls_sub)){
-    # average between lower and upper values 
-    sigma <- (calls_sub[1, "IV"] + calls_sub[2, "IV"])/2
+  # use provided sigma by default, else calculate from calls matrix
+  if(is.na(sigma)){
     
-  } else{
-    # retrive from numeric vector (single match)
-    sigma <- calls_sub["IV"]
+    # retrieve implied volatility for option 
+    if(is.matrix(calls_sub)){
+      # average between lower and upper values 
+      sigma <- (calls_sub[1, "IV"] + calls_sub[2, "IV"])/2
+      
+    } else{
+      # retrive from numeric vector (single match)
+      sigma <- calls_sub["IV"]
+    }
+    
+  }
+  else{ 
+    # rename for convenience
+    sigma <- IV
   }
   
-  # retrieve last price for option from VIx
-  S_t <- as.numeric( stock[length(stock)])
+  # if price at t is not provided
+  if(is.na(S_t)){
+    # retrieve last price for option from input index
+    warning("Using last day's S_t from input index\n")
+    S_t <- as.numeric( stock[length(stock)])
+  }
   
   # Calculate Option price 
   if(put==TRUE){
@@ -465,25 +490,43 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, put=FALSE){
 }
 ```
 
+```{r}
+S_t = sp500[length(sp500)] # last price of underlying 
+IV = vix[length(vix)] # last volatility 
+
+## test: specific price 
+price_option(T=20, K=1600, calls, rf_mat, stock = NA, S_t = S_t, IV = IV)
+```
+
+
 Next, using the function above we price the book of options given: 
 
 1. **1x** strike $K=1600$ with maturity $T=20d$ 
 2. **1x** strike $K=1605$ with maturity $T=40d$
 3. **1x** strike $K=1800$ with maturity $T=40d$ 
 
+First, we retrieve the latest value for the underlying (SP500) and the latest implied volatility (VIX): 
+
+```{r}
+S_t = sp500[length(sp500)] # last price of underlying 
+IV = vix[length(vix)] # last volatility 
+```
+
+Then, we price the options accordingly: 
+ 
 ```{r}
 # First Call Option 
-price_option(T=20, K=1600, calls, rf_mat, stock = sp500)
+price_option(T=20, K=1600, calls, rf_mat, S_t = S_t, IV = IV)
 ```
 
 ```{r}
 # Second Call Option 
-price_option(T=40, K=1605, calls, rf_mat, stock = sp500)
+price_option(T=40, K=1605, calls, rf_mat, S_t = S_t, IV = IV)
 ```
 
 ```{r}
 # Third Call Option 
-price_option(T=40, K=1800, calls, rf_mat, stock = sp500)
+price_option(T=40, K=1800, calls, rf_mat, S_t = S_t, IV = IV)
 ```
 
 ## Two risk drivers and copula-marginal model (Student-t and Gaussian Copula) 
@@ -491,16 +534,34 @@ price_option(T=40, K=1800, calls, rf_mat, stock = sp500)
 1. Compute the daily log-returns of the underlying stock 
 2. Assume the first invariant is generated using a Student-t distribution with $\nu=10$ df and the second invariant is generated using a Student-t distribution with $\nu=5$ df.
 3. Assume the **normal copula** to merge the marginals. 
-4. Generate 10000 scenarios for the one-week ahead price and the one-week ahead VIX value using the copula. 
+4. Generate 10000 scenarios for the one-week ahead price for the underlying and the one-week ahead VIX value using the copula. 
 5. Determine the P&L distribution of the book of options, using the simulated values. 
 6. Take interpolated rates for the term structure.  
 
-### Gaussian Copula 
+### Location-scale Student-t distribution 
+
+The location-scale model of the Student-t distribution with density function $f_{t}(x; \mu, \sigma, \nu)$ as:
+
+$$
+f_{t}(x; \mu, \sigma, \nu) 
+= 
+\dfrac{1}{\sigma} f_{t}\left(\dfrac{x\ - \mu}{\sigma}; \nu\right), 
+$$
+
+where: 
+
+$$
+f_{t}(z, \nu) 
+= \dfrac{\Gamma\left(\frac{\nu +1}{2} \right) }{\sqrt{\nu\pi} \Gamma \left(\frac{\nu}{2}\right)  }
+\left( 1  +\dfrac{z^2}{\nu}  \right)^{-\frac{\nu+1}{2}}
+$$
+
+### Gaussian Copula with two Student-t marginals
 
 A bivariate distribution $H$ can be formed via a copula $C$ from two marginal distributions with CDFs $F$ and $G$ via:
 
 $$
-H(x,y) = C(F(x), G(y))
+H(x,y) = C(F(x), G(y)) = C(F^{-1}(u), G^{-1}(u))
 $$
 
 with density 
@@ -515,7 +576,12 @@ $$
 C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(\Phi^{-1}(u), \Phi^{-1}(v)).
 $$
 
-In this case, instead of Gaussian marginals, we will use two Student-t distributions as marginals, say $t_{}$
+In this case, a Gaussian copula with two Student-t marginals with CDFs $t(\nu_1)$ with $\nu_1$ degrees of freedom and $t(\nu_2)$ with $\nu_2$ degrees of freedom is given by:
+
+$$
+C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(F_{\nu_1}^{-1}(u), F_{\nu_1}^{-1}(v)), 
+$$
+where $F_{\nu_1}$ and $F_{\nu_2}$ are their respective CDFs. 
 
 
 ### Log-returns 
@@ -525,10 +591,183 @@ In this case, instead of Gaussian marginals, we will use two Student-t distribut
 library("PerformanceAnalytics")
 
 # calculate returns
-rets <- 100 * PerformanceAnalytics::CalculateReturns(sp500, method="log")
-rets <- rets[rowSums(is.na(rets)) == 0,] # remove nas 
-head(rets)
+sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
+vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
+
+# remove nas 
+sp500_rets <- sp500_rets[rowSums(is.na(sp500_rets)) == 0,]
+vix_rets <- vix_rets[rowSums(is.na(vix_rets)) == 0,]
+
+# display
+head(sp500_rets) 
+head(vix_rets)
 ```
+
+### Generating the scenarios 
+
+Assumptions: 
+- Marginal Student-t distributions 
+- Disregard time dependence in the bootstrapping process 
+
+
+```{r,message=FALSE}
+# Load required libraries 
+library("fGarch")
+library("MASS")
+library("Matrix")
+
+# random seed for replication 
+set.seed(34)
+
+# Simulation parameters
+B = 10 # set number of bootstraps
+n_ahead = 5 # days aheade to produce samples 
+
+# vector version since ignoring dates and using full past data
+sp500_vec <- as.vector(sp500_rets) 
+vix_vec <- as.vector(vix_rets)
+
+# preallocate matrices to store simulations 
+sim_sp500 <- matrix(NA, nrow = B, ncol=5)
+sim_vix <- matrix(NA, nrow = B, ncol=5)
+
+# assign days ahead 
+colnames(sim_sp500) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+colnames(sim_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+
+# perform bootstrapping 
+for(b in 1:B){
+  
+  # Obtain the bootstrapped samples from the data 
+  b_sp500 <- sample(sp500_vec, size=length(sp500_vec), replace=TRUE)
+  b_vix <- sample(vix_vec, size=length(vix_vec), replace=TRUE)
+  
+  ##  Fit a Gaussian Copula to model the dependence 
+  
+  # calculate the mean vector 
+  mu <- c(mean(b_sp500), mean(b_vix))
+  
+  # calculate the covariance 
+  r <- cor(b_sp500, b_vix)[[1]] # correlation coefficient 
+  sig <- c(sd(b_sp500), sd(b_vix)) # standard deviation
+  R <- matrix(data = c(sig[1], r, r, sig[2]), # correlation matrix
+              nrow = 2,
+              ncol = 2,
+              byrow = TRUE)
+  Sigma <- diag(sig) %*% R %*% diag(sig) # covariance matrix
+  Sigma <- (Sigma + t(Sigma)) / 2
+  Sigma <- as.matrix(nearPD(Sigma)$mat)
+  
+  # Sample 5-days ahead from Gaussian Copula
+  Z <- mvrnorm(n = n_ahead, mu = mu, Sigma = Sigma)
+
+  # Draws from Gaussian Copula
+  U1 <- pnorm(q = Z[, 1], mu[1], sig[1]) # first dimension (sp500)
+  U2 <- pnorm(q = Z[, 2], mu[2], sig[2]) # second dimension  (vix)
+  
+  # Model marginals with student-t distributions & sample
+  X1 <- qt(U1, df = 10) # simulated sp500
+  X2 <- qt(U2, df = 5) # simulated vix
+  
+  # store simulation in matrix 
+  sim_sp500[b, ] <- X1 
+  sim_vix[b ,] <- X2
+}
+
+head(sim_sp500)
+head(sim_vix)
+```
+```{r}
+f_return_to_price <- function(p0, forecasted_rets)
+{
+  # p0: initial price
+  # forecasted_rets: matrix of forecasted returns
+  
+  forecasted_prices = matrix(NA, nrow(forecasted_rets), ncol(forecasted_rets))
+  temp = p0
+  
+  for(i in 1:nrow(forecasted_rets))
+  {
+    for(j in 1:ncol(forecasted_rets))
+    {
+      forecasted_prices[i,j] = exp(log(temp) + forecasted_rets[i,j])
+    }
+    temp = forecasted_prices[i,j]
+  }
+  
+  # assign colnames
+  colnames(forecasted_prices) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+  
+  return(forecasted_prices)
+}
+```
+
+```{r}
+# Obtain Initial values (last value of simulation) 
+spT <- sp500[length(sp500)] 
+vixT <- vix[length(vix)] 
+
+# Convert back to price and to vix values 
+sim_price_sp500 <- f_return_to_price(spT, sim_sp500)
+sim_vol_vix <- f_return_to_price(vixT, sim_vix)
+
+# display head values 
+head(sim_price_sp500) 
+head(sim_vol_vix)
+```
+Recall the initial (call) options: 
+
+1. **1x** strike $K=1600$ with maturity $T=20d$ 
+2. **1x** strike $K=1605$ with maturity $T=40d$
+3. **1x** strike $K=1800$ with maturity $T=40d$ 
+
+```{r}
+# P/L of book of options 
+PL_mat <- matrix(NA, nrow(sim_price_sp500), ncol(sim_price_sp500))
+
+# wrapper for price_option 
+prc_opt <- function(T, K, calls, rf_mat, price_vec, IV){ 
+  # Calculate the options for all input S_t 
+  sapply(price_vec, function(y){price_option(T=T, # maturity
+                                             K=K, # strike 
+                                             calls, # calls matrix 
+                                             rf_mat, # matrix of risk free structure
+                                             stock = NA, # ignore 
+                                             S_t = y, # specific price
+                                             IV = IV)$Call}) # implied volatility + extract Call price
+}
+
+#  maturities for each of the options
+T1 <- 20
+T2 <- 40
+T3 <- 40
+
+# Strikes for the options 
+K1 <- 1600 
+K2 <- 1605 
+K3 <- 1800
+
+# looop through simulated prices 
+for(t in 1:ncol(sim_price_sp500)){
+  
+  # extract simulated prices for sp500 at T+t
+  prices_t <- sim_price_sp500[, t] 
+  
+  # extract implied volatility from vix at T+t 
+  vols_t <- sim_vol_vix
+  
+  # # price first Call option
+  # c1_vec <- prc_opt(T1-t, K, calls, rf_mat, prices_t) 
+}
+```
+
+
+**TO FINISH** 
+
+
+
+
+
 
 
 
