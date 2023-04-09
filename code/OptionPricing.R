@@ -4,22 +4,17 @@
 # Author: Hair Parra 
 # Description: Functions used for Options Pricing 
 ###############################################################################
-
-
 ###############################################################################
 
 ####################
 ### 0. Packages ####
 ####################
 
-
-
 ###############################################################################
 
 #########################
 ### 1. Black-Scholes ####
 #########################
-
 
 get_d1 <- function(S_t, K, tau, r, sigma){ 
   ### Compute d1 for the Black-Scholes model 
@@ -254,3 +249,54 @@ prc_opt <- function(T, K, calls, rf_mat, price_vec, vol_vec){
   return(opt_prices)
 }
 
+
+###############################################################################
+
+#########################
+### 3. Option Profit ####
+#########################
+
+option_profit <- function(S,K,c=NULL, p=NULL, short=FALSE, N=1){
+  #### Calculates Call and or Put profits
+  # 
+  # INPUTS
+  #   S:          [numeric or vector] array of prices to use 
+  #   K:          [numeric] Strike price for the option 
+  #   c:          [numeric or vector] array of premiums for a Call option
+  #   sim_mat:    [matrix] (n_sim x n_days_ahead) matrix of simulation prices for 
+  #               n_days ahead, with n_sim simulations. 
+  #   lnames:     [character vector] vector with names for each of the created matrices 
+  #   num_mats:   [numeric] number of matrices to create 
+  # 
+  # OUTPUT: 
+  #   mats:       [list of matrices] List containing three matrices of compatible sizes as sim_mat
+  #               initialized to NA  values
+  
+  # Initialize empty profit values 
+  profits <- list(call_profit=NA, put_profit=NA)
+  call_profit = NA
+  put_profit = NA
+  
+  # sanity check 
+  if(is.null(c) & is.null(p)){
+    stop("At least one of c or p must be provided") 
+  }
+  
+  # if c, calculate the Call profit 
+  if(!is.null(c)){
+    profits$call_profit <- (max(S - K, 0) - c)*N
+  }
+  
+  # if p, calculate the Put profit 
+  if(!is.null(p)){
+    profits$put_profit <- (max(K - S, 0) - p)*N
+  }
+  
+  # inverse profit if short position 
+  if(short){
+    profits <- lapply(profits, function(x){-x})
+  }
+  
+  # multiply by size 
+  return(profits)
+}
