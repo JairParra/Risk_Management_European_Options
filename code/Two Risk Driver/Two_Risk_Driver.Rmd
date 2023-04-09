@@ -213,12 +213,16 @@ for(i in 1:n_day){
 Graph the PL to find the distribution
 
 ```{r}
-hist(PL_matrices$PL1)
-hist(PL_matrices$PL2)
-hist(PL_matrices$PL3)
+#P&L for Call option 1 is
+hist(PL_matrices$PL1, nclass = round(10*log(length(PL_matrices$PL1))),
+     main = "Distribution of P&L of Call Option 1",
+     xlab = "P&L of Calls")
 
 ```
 
-
+```{r}
+hist(PL_matrices$PL2, nclass = round(10*log(length(PL_matrices$PL1))))
+hist(PL_matrices$PL3, nclass = round(10*log(length(PL_matrices$PL1))))
+```
 
 
