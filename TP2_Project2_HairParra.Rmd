@@ -970,13 +970,18 @@ for(t in 1:n_ahead){
   c1 <- opt_price_mats$opt1[, t] # extract the premiums
   PL_mats$PL1[,t] <- option_profit(S=spot, K=K1, c=c1)$call_profit
   
-  # Option profit for K1 at time T+t with premiums c2
-  c2 <- opt_price_mats$opt2[, t] # extract the premiums
-  PL_mats$PL2[,t] <- option_profit(S=spot, K=K2, c=c2)$call_profit
-
-  # Option profit for K1 at time T+t with premiums c1
-  c3 <- opt_price_mats$opt3[, t] # extract the premiums
-  PL_mats$PL3[,t] <- option_profit(S=spot, K=K3, c=c3)$call_profit
+  print(head(c1))
+  print(head(spot))
+  
+  break
+  
+  # # Option profit for K1 at time T+t with premiums c2
+  # c2 <- opt_price_mats$opt2[, t] # extract the premiums
+  # PL_mats$PL2[,t] <- option_profit(S=spot, K=K2, c=c2)$call_profit
+  # 
+  # # Option profit for K1 at time T+t with premiums c1
+  # c3 <- opt_price_mats$opt3[, t] # extract the premiums
+  # PL_mats$PL3[,t] <- option_profit(S=spot, K=K3, c=c3)$call_profit
 }
 ```
 
