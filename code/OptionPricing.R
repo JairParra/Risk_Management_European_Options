@@ -115,7 +115,7 @@ interpolate <- function(x,x1=1,y1=1,x2=2,y2=2){
 }
 
 
-price_option <- function(T, K, calls, rf_mat, stock=NA, S_t=NA, IV = NA, put=FALSE){ 
+price_option <- function(T, K, calls, rf_mat, stock=NULL, S_t=NULL, IV = NULL, put=FALSE){ 
   # Calculates the price of an European option using input parameters
   # INPUTS
   #   T:        [numeric] maturity of option (in days)
@@ -135,14 +135,13 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, S_t=NA, IV = NA, put=FAL
   #     - calls [matrix] relevant set of calls information 
   #     - rates [matrix] relevant set of risk-free rates used for the interpolation
   
-  require("Matrix")
-  
   # Sanity check 
   if(!is.matrix(calls) | !('tau_days' %in% colnames(calls)) ){
     stop("calls should be a matrix with columns c('K', 'tau', 'IV', 'tau_days')")
   }
   
   # Inputs
+  sigma <- NA
   tau = T/250 # days --> years 
   days_calls <- calls[,"tau_days"] # extract days column
   days_rf <- rf_mat[, "days"] # extract days from rf_mat
@@ -171,7 +170,7 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, S_t=NA, IV = NA, put=FAL
                    y2=rates[2,1])
   
   # use provided sigma by default, else calculate from calls matrix
-  if(is.na(sigma)){
+  if(is.null(IV)){
     
     # retrieve implied volatility for option 
     if(is.matrix(calls_sub)){
@@ -190,7 +189,7 @@ price_option <- function(T, K, calls, rf_mat, stock=NA, S_t=NA, IV = NA, put=FAL
   }
   
   # if price at t is not provided
-  if(is.na(S_t) & !is.na(stock)){
+  if(is.null(S_t) & !is.null(stock)){
     # retrieve last price for option from input index
     warning("Using last day's S_t from input index\n")
     S_t <- as.numeric( stock[length(stock)])
