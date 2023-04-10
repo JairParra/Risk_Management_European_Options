@@ -698,7 +698,10 @@ colnames(sim_rets_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
 
 ```{r, warning=FALSE}
 # Load required libraries 
+library("fGarch")
 library("MASS")
+library("copula")
+library("Matrix")
 
 # random seed for replication 
 set.seed(123)
@@ -743,8 +746,10 @@ theta2
 
 ```{r}
 # Fit Student-t to the marginals
-U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = theta1[3]) # sp500
-U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = theta2[3]) # vix
+# U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = theta1[3]) # sp500
+# U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = theta2[3]) # vix
+U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = 10) # sp500
+U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = 5) # vix
 # U1 <- pt(sp500_rets_vec, df = 5) # sp500
 # U2 <- pt(vix_rets_vec, df = 10) # vix
 U <- cbind(U1, U2) # join into one matrix
@@ -772,8 +777,10 @@ n_sim = 10000 # set number of simulations
 U_sim <- rCopula(n_sim, fit@copula)
 
 # use copula U_sim to reproduce the marginals with student-t distr
-rets1_sim <- qstd(U_sim[,1], mean = mu[1], sd = sigma[1], nu = theta1[3]) # sp500
-rets2_sim <- qstd(U_sim[,2], mean = mu[1], sd = sigma[1], nu = theta2[3]) # vix
+# rets1_sim <- qstd(U_sim[,1], mean = mu[1], sd = sigma[1], nu = theta1[3]) # sp500
+# rets2_sim <- qstd(U_sim[,2], mean = mu[1], sd = sigma[1], nu = theta2[3]) # vix
+rets1_sim <- qstd(U_sim[,1], mean = mu[1], sd = sigma[1], nu = 10) # sp500
+rets2_sim <- qstd(U_sim[,2], mean = mu[1], sd = sigma[1], nu = 5) # vix
 rets_sim <- cbind(rets1_sim, rets2_sim)
 
 # visualize
@@ -936,7 +943,7 @@ K2 <- 1605
 K3 <- 1800
 
 # looop through simulated prices (n_ahead days)
-for(t in 1:ncol(sim_price_sp500)){
+for(t in 1:n_ahead){
   
   # extract simulated prices for sp500 at T+t
   prices_t <- sim_price_sp500[, t] 
@@ -1036,22 +1043,56 @@ head(PL_mats$PL3)
 
 Next, using all the simulated profits and losses for each of the options, we display a histogram for the distribution for each of the options, for the aggregated 5 days of simulation: 
 
-```{r fig.height=6, fig.width=6, fig.align='center'}
+```{r fig.height=7, fig.width=7, fig.align='center'}
 # flatten the matrices 5-days ahead simulated P/L for the three options 
 sim_pl_opt1 <- as.vector(PL_mats$PL1)
 sim_pl_opt2 <- as.vector(PL_mats$PL2)
 sim_pl_opt3 <- as.vector(PL_mats$PL3)
 
+# Compute the 95% VaR  
+opt1_VaR <- quantile(sim_pl_opt1, probs = 0.05)
+opt2_VaR <- quantile(sim_pl_opt2, probs = 0.05)
+opt3_VaR <- quantile(sim_pl_opt3, probs = 0.05)
+
 # plot the distribution for each of the options 
 par(mfrow = c(2,2))
 hist(sim_pl_opt1, nclass = round(10 * log(n_sim)), probability = TRUE)
+lines(density(sim_pl_opt1), lwd=2, col="blue")
+abline(v=opt1_VaR, col="red")
+rug(sim_pl_opt1)
+
+
 hist(sim_pl_opt2, nclass = round(10 * log(n_sim)), probability = TRUE)
+lines(density(sim_pl_opt2), lwd=2, col="blue")
+abline(v=opt2_VaR, col="red")
+rug(sim_pl_opt2)
+
+
 hist(sim_pl_opt3, nclass = round(10 * log(n_sim)), probability = TRUE)
+lines(density(sim_pl_opt3), lwd=2, col="blue")
+abline(v=opt3_VaR, col="red")
+rug(sim_pl_opt3)
 ```
 
-### VaR95 and the ES95 
+### VaR95
 
-**TODO**
+**Definition** 
+
+For a random variable $X$, the **Value-at-Risk (VaR)** at level $\alpha$ is defined as the $\alpha$-lower quantile of the distribution of X, thus: 
+$$
+VaR_X(\alpha) = F^{-1}_{X}(1 - \alpha)
+$$
+
+**First Option** 
+
+```{r}
+# 95% VaR
+quantile(sim_pl_opt1, probs = 0.05)
+```
+
+
+
+
 
 
 
