@@ -72,3 +72,11 @@ f_next_Pt <- function(Pt, log_Rt_next){
   
   return(Pt_next)
 }
+
+# Expected shortfall implementation 
+es <- function(returns,  alpha = 0.05) {
+  ### Implementation of expected shortfall 
+  var <- quantile(returns, alpha)
+  es <- mean(returns[returns < var])
+  es
+}
