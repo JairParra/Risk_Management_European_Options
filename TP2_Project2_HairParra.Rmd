@@ -54,6 +54,9 @@ library(quantmod)
 source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
 source(here("code", "StudentCopulaPdf.R")) # compute the pdf of a normal copula
 source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
+
+# additional source code for this assg
+source(here("code", "Utils.R")) # display the pdf through a 3-d chart
 ```
 
 
@@ -545,24 +548,6 @@ price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 5. Determine the P&L distribution of the book of options, using the simulated values. 
 6. Take interpolated rates for the term structure.  
 
-### Location-scale Student-t distribution 
-
-The location-scale model of the Student-t distribution with density function $f_{t}(x; \mu, \sigma, \nu)$ as:
-
-$$
-f_{t}(x; \mu, \sigma, \nu) 
-= 
-\dfrac{1}{\sigma} f_{t}\left(\dfrac{x\ - \mu}{\sigma}; \nu\right), 
-$$
-
-where: 
-
-$$
-f_{t}(z, \nu) 
-= \dfrac{\Gamma\left(\frac{\nu +1}{2} \right) }{\sqrt{\nu\pi} \Gamma \left(\frac{\nu}{2}\right)  }
-\left( 1  +\dfrac{z^2}{\nu}  \right)^{-\frac{\nu+1}{2}}
-$$
-
 ### Gaussian Copula with two Student-t marginals
 
 A bivariate distribution $H$ can be formed via a copula $C$ from two marginal distributions with CDFs $F$ and $G$ via:
@@ -592,6 +577,18 @@ where $F_{\nu_1}$ and $F_{\nu_2}$ are their respective CDFs.
 
 
 ### Log-returns 
+
+The **discrete returns** are given by: 
+
+$$
+R_{t+1} = \dfrac{P_{t+1} - P_{t}}{P_{t}}
+$$
+
+and the next ahead log-returns are given by: 
+
+$$
+\log(R_{t+1}) = \log(P_{t+1} - P_{t}) - \log(P_{t})
+$$
 
 ```{r, message=FALSE}
 # load reqruired libraries 
@@ -626,8 +623,12 @@ library("Matrix")
 # random seed for replication 
 set.seed(69)
 
+##############################
+### Setup & Initialization ###
+##############################
+
 # Simulation parameters
-n_sim = 10000 # set number of simulations
+n_sim = 10 # set number of simulations
 n_ahead = 5 # days aheade to produce samples 
 
 # vector version since ignoring dates and using full past data
@@ -642,32 +643,41 @@ sim_rets_vix <- matrix(NA, nrow = n_sim, ncol=5)
 colnames(sim_rets_sp500) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
 colnames(sim_rets_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
 
+#########################
+### Fitting the model ###
+#########################
+
+# straight up fit on the data 
+b_sp500 <- sp500_rets_vec 
+b_vix <- vix_rets_vec
+
+##  Fit a Gaussian Copula to model the dependence 
+
+# calculate the mean vector 
+mu <- c(mean(b_sp500), mean(b_vix))
+
+# calculate the covariance 
+r <- cor(b_sp500, b_vix)[[1]] # correlation coefficient 
+sig <- c(sd(b_sp500), sd(b_vix)) # standard deviation
+R <- matrix(data = c(1, r, r, 1), # correlation matrix
+            nrow = 2,
+            ncol = 2,
+            byrow = TRUE)
+Sigma <- diag(sig) %*% R %*% diag(sig) # covariance matrix
+Sigma <- (Sigma + t(Sigma)) / 2
+Sigma <- as.matrix(nearPD(Sigma)$mat)
+
+##############################
+### Running the simulation ###
+##############################
+
 # perform simulations 
 for(b in 1:n_sim){
   
   # # Obtain the bootstrapped samples from the data (?) >-- not sure if this is right? 
   # b_sp500 <- sample(sp500_vec, size=length(sp500_vec), replace=TRUE)
   # b_vix <- sample(vix_vec, size=length(vix_vec), replace=TRUE)
-  
-  # straight up fit on the data 
-  b_sp500 <- sp500_rets_vec 
-  b_vix <- vix_rets_vec
-  
-  ##  Fit a Gaussian Copula to model the dependence 
-  
-  # calculate the mean vector 
-  mu <- c(mean(b_sp500), mean(b_vix))
-  
-  # calculate the covariance 
-  r <- cor(b_sp500, b_vix)[[1]] # correlation coefficient 
-  sig <- c(sd(b_sp500), sd(b_vix)) # standard deviation
-  R <- matrix(data = c(1, r, r, 1), # correlation matrix
-              nrow = 2,
-              ncol = 2,
-              byrow = TRUE)
-  Sigma <- diag(sig) %*% R %*% diag(sig) # covariance matrix
-  Sigma <- (Sigma + t(Sigma)) / 2
-  Sigma <- as.matrix(nearPD(Sigma)$mat)
+
   
   # Sample 5-days ahead from Gaussian Copula
   Z <- mvrnorm(n = n_ahead, mu = mu, Sigma = Sigma)
@@ -690,43 +700,97 @@ head(sim_rets_sp500)
 head(sim_rets_vix)
 ```
 
-Next, we crate a function to forecast the 5 day ahead prices from the returns
+### Computing Prices from Returns 
+
+Next, we crate a function to forecast the 5 day ahead prices from the returns. Since: 
+
+$$
+\begin{aligned}
+\log(R_{t+1})&= \log(P_{t+1} - P_{t}) - \log(P_{t}) \\ 
+\implies \log(P_{t+1} - P_{t})  &= \log(R_{t+1}) + \log(P_{t}) \\ 
+\implies P_{t+1} - P_{t} &= \exp\left(  \log(R_{t+1}) + \log(P_{t})  \right) \\ 
+\implies P_{t+1} &= \exp\left(  \log(R_{t+1}) + \log(P_{t})  \right) + P_t  \\ 
+\implies P_{t} & = \exp\left(  \log(R_{t}) + \log(P_{t-1})  \right) + P_{t-1} 
+\end{aligned}
+$$
 
 ```{r}
-f_return_to_price <- function(p0, forecasted_rets)
-{
+# parameters
+Pt <- sp500[length(sp500)][[1]] # initial price P_t
+log_Pt <- log(Pt) # llog of current prices log(P_{t})
+log_Rt_next <- sim_rets_sp500[, 1] # next set of returns log(R_{t+1})
+Pt_next <- exp(log_Rt_next + log_Pt) + Pt
+
+# display
+Pt
+log_Pt 
+log_Rt_next 
+log_Rt_next + log_Pt
+exp(log_Rt_next + log_Pt)
+Pt_next
+```
+
+
+```{r}
+f_next_Pt <- function(Pt, log_Rt_next){
+  #### Wrapper for price_option for two vectors of prices and volatilities 
+  # 
+  # INPUTS
+  #   Pt:           [numeric] Price of underlying at time t  (aka P_{t})
+  #   log_Rt_next:  [vector numeric] vector of simulated log returns at time t+1 (aka log(R_{t+1}) )
+  # 
+  # OUTPUTS: 
+  #   opt prices: [numeric vector] vector of prices computed from current underlying price Pt and 
+  #               the log returns for the next day ahead R_{t+1}, via the formula: 
+  #                P_{t+1} = exp( log(R_{t+1}) +  log(P_{t}) ) _ P_{t}
   
-  # p0: initial price
-  # forecasted_rets: matrix of forecasted returns
+  # compute the log of Pt 
+  log_Pt <- log(Pt)
   
-  forecasted_prices = matrix(NA, nrow(forecasted_rets), ncol(forecasted_rets))
-  temp = p0
+  # P_{t+1} = exp( log(R_{t+1}) +  log(P_{t}) ) _ P_{t}
+  Pt_next <- exp(log_Rt_next + log_Pt) + Pt 
   
-  for(i in 1:nrow(forecasted_rets))
-  {
-    for(j in 1:ncol(forecasted_rets))
-    {
-      forecasted_prices[i,j] = exp(log(temp) + forecasted_rets[i,j])
-    }
-    temp = forecasted_prices[i,j]
-  }
-  
-  # assign colnames
-  colnames(forecasted_prices) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-  
-  return(forecasted_prices)
+  return(Pt_next)
 }
 ```
 
 ```{r}
 # Obtain Initial values (last value of simulation) 
-spT <- sp500[length(sp500)] 
-vixT <- vix[length(vix)] 
+spT <- sp500[length(sp500)][[1]]
+vixT <- vix[length(vix)][[1]]
 
-# Convert back to price and to vix values 
-sim_price_sp500 <- f_return_to_price(spT, sim_rets_sp500)
-sim_vol_vix <- f_return_to_price(vixT, sim_rets_vix)
+# Initialize empty matrices for the simulated sp500 and vix values
+sim_val_mats <- initialize_sim_mats(sim_rets_sp500, 
+                                       lnames = c("sp500", "vix"), # <- this function comes from Utils.R
+                                       num_mats = 2
+                                       )
 
+# Initialize the first prices 
+sim_val_mats$sp500[, 1] <- f_next_Pt(spT, sim_rets_sp500[, 1])
+sim_val_mats$vix[, 1] <- f_next_Pt(spT, sim_rets_vix[, 1])
+
+# for each day ahead
+for(t in 2:n_ahead){
+  # obtain the values for P_{t-1}
+  Pt_prev_sp500 <- sim_val_mats$sp500[, t-1] 
+  Pt_prev_vix <- sim_val_mats$vix[, t-1] 
+  
+  # extract current returns R_{t}
+  Rt_sp500 <- sim_rets_sp500[, t] 
+  Rt_vix <- sim_rets_vix[, t]
+  
+  # compute and assign next price ahead using current returns
+  sim_val_mats$sp500[, t] <- f_next_Pt(Pt_prev_sp500, Rt_sp500)
+  sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix)
+}
+
+# unpack matrices 
+sim_price_sp500 <- sim_val_mats$sp500 
+sim_vol_vix <- sim_val_mats$vix
+```
+
+
+```{r}
 # compare simulated returns with the price
 head(sim_rets_sp500)
 head(sim_price_sp500) 
@@ -780,41 +844,6 @@ prc_opt <- function(T, K, calls, rf_mat, price_vec, vol_vec){
   opt_prices <- mapply(price_opt_abstr, vec_df$price_vec, vec_df$vol_vec)
   
   return(opt_prices)
-}
-
-initialize_sim_mats <- function(sim_mat, lnames=NULL, num_mats=3){
-  #### Initializesa list of (num_mats) many matrices of same size as sim_mat with NA entries
-  # 
-  # INPUTS
-  #   sim_mat:    [matrix] (n_sim x n_days_ahead) matrix of simulation prices for 
-  #               n_days ahead, with n_sim simulations. 
-  #   lnames:     [character vector] vector with names for each of the created matrices 
-  #   num_mats:   [numeric] number of matrices to create 
-  # 
-  # OUTPUT: 
-  #   mats:       [list of matrices] List containing three matrices of compatible sizes as sim_mat
-  #               initialized to NA  values
-  
-  
-  # P/L of book of options 
-  mats <- lapply(rep(1, num_mats), # generate three empty matrices of compatible sizes
-                    function(x){
-                      matrix(NA, 
-                             nrow(sim_mat), 
-                             ncol(sim_mat),
-                             dimnames=list(seq(1:nrow(sim_mat)),
-                                           c("T+1", "T+2", "T+3", "T+4", "T+5")
-                                           )
-                             )
-                      }
-                    )
-  
-  # assign column names 
-  if(!is.null(lnames)){
-    names(mats) <- lnames
-  }
-  
-  return(mats)
 }
 ```
 
@@ -1004,9 +1033,9 @@ sim_pl_opt3 <- as.vector(PL_mats$PL3)
 
 # plot the distribution for each of the options 
 par(mfrow = c(3,1))
-hist(sim_pl_opt1, nclass = round(10 * log(n_sim)), probability = TRUE)
-hist(sim_pl_opt2, nclass = round(10 * log(n_sim)), probability = TRUE)
-hist(sim_pl_opt3, nclass = round(10 * log(n_sim)), probability = TRUE)
+# hist(sim_pl_opt1, nclass = round(10 * log(n_sim)), probability = TRUE)
+# hist(sim_pl_opt2, nclass = round(10 * log(n_sim)), probability = TRUE)
+# hist(sim_pl_opt3, nclass = round(10 * log(n_sim)), probability = TRUE)
 ```
 
 
