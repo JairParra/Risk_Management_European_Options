@@ -1049,36 +1049,31 @@ sim_pl_opt1 <- as.vector(PL_mats$PL1)
 sim_pl_opt2 <- as.vector(PL_mats$PL2)
 sim_pl_opt3 <- as.vector(PL_mats$PL3)
 
-# Compute the 95% VaR  
-opt1_VaR <- quantile(sim_pl_opt1, probs = 0.05)
-opt2_VaR <- quantile(sim_pl_opt2, probs = 0.05)
-opt3_VaR <- quantile(sim_pl_opt3, probs = 0.05)
-
-# Compute the 95% ES 
-opt1_es <- es(sim_pl_opt1, alpha=0.05)
-opt2_es <- es(sim_pl_opt2, alpha=0.05)
-opt3_es <- es(sim_pl_opt3, alpha=0.05)
+# Compute the 95% VaR and 95% ES
+opt1_VaR_ES <- f_VaR_ES(sim_pl_opt1, alpha = 0.05)
+opt2_VaR_ES <- f_VaR_ES(sim_pl_opt2, alpha = 0.05)
+opt3_VaR_ES <- f_VaR_ES(sim_pl_opt3, alpha = 0.05)
 
 # plot the distribution for each of the options 
 par(mfrow = c(2,2))
 hist(sim_pl_opt1, nclass = round(10 * log(n_sim)), probability = TRUE)
 lines(density(sim_pl_opt1), lwd=2, col="blue")
-abline(v=opt1_VaR, col="red") # 95% VaR
-abline(v=opt1_es, col="black") # expected shortfall 
+abline(v=opt1_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt1_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt1)
 
 
 hist(sim_pl_opt2, nclass = round(10 * log(n_sim)), probability = TRUE)
 lines(density(sim_pl_opt2), lwd=2, col="blue")
-abline(v=opt2_VaR, col="red") # 95% VaR
-abline(v=opt2_es, col="black") # expected shortfall 
+abline(v=opt2_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt2_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt2)
 
 
 hist(sim_pl_opt3, nclass = round(10 * log(n_sim)), probability = TRUE)
 lines(density(sim_pl_opt3), lwd=2, col="blue")
-abline(v=opt3_VaR, col="red") # 95% VaR
-abline(v=opt3_es, col="black") # expected shortfall 
+abline(v=opt3_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt3_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt3)
 ```
 
@@ -1094,10 +1089,9 @@ $$
 **First Option** 
 
 ```{r}
-# Compute the 95% VaR  
-opt1_VaR 
-opt2_VaR
-opt3_VaR
+opt1_VaR_ES$VaR # first option 
+opt2_VaR_ES$VaR # second doption 
+opt3_VaR_ES$VaR # third option
 ```
 ## ES95 
 
@@ -1105,13 +1099,10 @@ Expected shortfall is calculated by averaging all of the returns in the distribu
 
 ```{r}
 # display 
-opt1_es
-opt2_es
-opt3_es
+opt1_VaR_ES$ES
+opt2_VaR_ES$ES
+opt3_VaR_ES$ES
 ```
-
-
-
 
 
 
