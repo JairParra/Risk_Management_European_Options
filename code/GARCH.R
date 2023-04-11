@@ -70,6 +70,7 @@ f_optim <- function(y) {
   eps_hat   <- y / sqrt(sig2_hat) # estimates of the innovations 
   
   out <- list(theta_hat = theta_hat, # pack into a list for convenience
+              sig2_hat = sig2_hat, 
               eps_hat   = eps_hat)
   return(out)
 }

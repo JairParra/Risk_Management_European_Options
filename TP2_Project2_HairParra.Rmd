@@ -1024,7 +1024,7 @@ $$
 
 **VIX log-returns** 
 
-```{r}
+```{r, warning=FALSE}
 library("forecast")
 # Construct an AR(1) model to the vix 
 vix_ar1 <- ar(vix_rets, order.max = 1) 
@@ -1187,10 +1187,49 @@ $$
 First, obtain last conditional variance available (up to time T): 
 
 ```{r}
+# recall the fitted GARCH parameters
+theta_hat_garch
+
+# function to forecast from previous observations
+f_forecast_sig2 <- function(theta, sig2_prev, y_prev, y_vec, steps=5) {
+  
+  sig2 <- rep(NA, steps) # create a vector to store the cond. vars
+  
+  # calculate first conditional variance (given last step)
+  sig2[1] <- theta[1] + theta[2] * y_prev^2 + theta[3] * sig2_prev
+  
+  # compute subsequent cond. variances using model formula
+  for (i in 2:steps) {
+    sig2[i] <- theta[1] + theta[2] * y_vec[i-1]^2 + theta[3] * sig2[i-1]
+  }
+  
+  # return 
+  return(sig2)
+}
+```
+
+```{r}
+# data from up to T 
+y <- sp500_rets_vec
+sig2 <- fit_garch$sig2_hat 
+theta <- fit_garch$theta_hat 
+
+# initial parameters
+y_prev <- y[length(y)] 
+sig2_prev <- sig2[length(sig2)]
+
+# residuals forecasted from copula (invariants)
+garch_resids_next <- sim_inv_sp500
+# 
+# sp500_resids <- fit_garch$eps_hat
+```
+
+
+
+```{r}
 # extrct the residuals
 sp500_resids <- fit_garch$eps_hat
 
-# compute the 
 ```
 
 

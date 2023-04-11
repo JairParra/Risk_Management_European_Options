@@ -1184,7 +1184,7 @@ $$
 \sigma^{2}_{t} = \omega \; + \; \alpha y_{t-1}^2 + \beta \sigma_{t-1}^{2}
 $$
 
-First, obtain last conditional variance available (up to time T): 
+First, obtain last conditional variance available (up to time T), and then we forecast the conditional variances five days ahead, starting with the last variance: 
 
 ```{r}
 # extrct the residuals
