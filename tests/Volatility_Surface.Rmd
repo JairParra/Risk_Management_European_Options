@@ -1,0 +1,101 @@
+#Volatility Surface
+
+Upload libraries
+```{r}
+library("here")
+
+source(here("code", "OptionPricing.R"))
+```
+
+Load data
+```{r}
+load(here("data_raw", "Market.rda"))
+
+S <- as.numeric(Market$sp500) #3410
+
+K <- Market$calls[,"K"]
+
+IV <- as.numeric(Market$vix)
+
+tau <- Market$calls[,"tau"] #422
+
+length(S)
+
+```
+
+Parametric Surface
+```{r}
+f_variable <- function(K, S, tau, IV){
+  #Each column for a different strike price
+  money_m <- matrix(NA, nrow = length(S), ncol = length(K))
+  tau_m <- matrix(rep(tau,each= length(S)),nrow=length(S))
+  IV_m <- matrix(rep(IV, each = ncol(money_m)), ncol = ncol(money_m))
+  
+  for(i in 1:ncol(money_m)){
+    money_m[, i] <- K[i]/S
+  }
+  
+  variable <- list(m = money_m,
+                   t = tau_m,
+                   IV = IV_m)
+  
+  return(variable)
+}
+
+f_parameter <- function(alpha, m, t, IV){
+  #m is an array of K/S
+  #t is a repetitive array same tau for K
+  #IV is a vector or numbers
+  #alpha is a set of paramters
+  a1 <- alpha[1]
+  a2 <- alpha[2]
+  a3 <- alpha[3]
+  a4 <- alpha[4]
+  
+  sig <- a1 + a2*(m-1)^2 + a3*(m-1)^3 + a4*sqrt(t)
+  
+ # rint(dim(sig))
+  
+  #print(dim(IV))
+  
+  result <- abs(IV - sig)
+  
+  return(sum(result))
+}
+```
+
+Optimize the function
+
+```{r}
+#Initialization
+start <- c(0, 0, 1, 0)
+m_variable <- f_variable(K, S, tau, IV)
+
+
+test <- f_parameter(start, m_variable$m[1:10,1:10], m_variable$t[1:10, 1:10], m_variable$IV[1:10,1:10])
+test
+
+length(IV)
+dim(test)
+dim(m_variable$m)
+dim(m_variable$t)
+dim(m_variable$IV)
+
+#Optimize
+fit <- optim(par = start,
+             fn = f_parameter,
+             method = "BFGS",
+             m = m_variable$m,
+             t = m_variable$t,
+             IV = IV)
+
+fit$par
+
+
+
+
+```
+
+
+
+
