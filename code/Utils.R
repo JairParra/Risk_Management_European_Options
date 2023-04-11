@@ -51,6 +51,10 @@ initialize_sim_mats <- function(sim_mat, lnames=NULL, num_mats=3){
   return(mats)
 }
 
+#######################################################
+### 2. Price prediction from Simulated Log-returns ####
+#######################################################
+
 
 f_next_Pt <- function(Pt, log_Rt_next){
   #### Wrapper for price_option for two vectors of prices and volatilities 
@@ -71,4 +75,17 @@ f_next_Pt <- function(Pt, log_Rt_next){
   Pt_next <- exp(log_Rt_next + log_Pt)
   
   return(Pt_next)
+}
+
+#######################
+### 3. VaR and ES ####
+######################
+
+f_VaR_ES <- function(x, alpha=0.05) {
+  ### Calculates the VaR and the  ES at alpha level 
+  
+  var <- as.numeric(quantile(x, probs = alpha))
+  es <- mean(x[x< var])
+  
+  return(list(VaR=var, ES=es))
 }
