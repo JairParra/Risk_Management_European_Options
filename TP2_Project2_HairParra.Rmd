@@ -57,7 +57,8 @@ source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
 
 # additional source code for this assg
 source(here("code", "Utils.R")) # display the pdf through a 3-d chart
-source(here("code", "OptionPricing.R")) # display the pdf through a 3-d chart
+source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
+source(here("code", "GARCH.R")) # display the pdf through a 3-d chart
 ```
 
 
@@ -259,63 +260,11 @@ P(S_t, t) = Ke^{-r \times \tau}(1 - N(d_2))  - S_t(1-N(d_1)),
 \end{cases}
 $$
 
-### Implementation 
+### BlackScholes function 
 
 ```{r}
-get_d1 <- function(S_t, K, tau, r, sigma){ 
-  ### Compute d1 for the Black-Scholes model 
-  # INPUTS
-  #   S_t:  Current value of underlying asset price
-  #   K:    Strike Price
-  #   tau:  T- t, where T=maturity, and t=current time
-  #   r:    risk-free rate 
-  #   sigma   Implied volatility (i.e. sigma)
-  
-  num <- (log(S_t/K) - tau*(r + 0.5*sigma**2)) # numerator
-  denom <- sigma * sqrt(tau) # denominator 
-  
-  return(num/denom)
-}
-
-get_d2 <- function(d1, sigma, tau){
-  ### Compute d2 for the Black-Scholes model 
-  # INPUTS
-  #   d1:  d1 factor calculated by the get_d1 function
-  #   tau:  T- t, where T=maturity, and t=current time
-  #   sigma   Implied volatility (i.e. sigma)
-  
-  return(d1 - sigma * sqrt(tau))
-}
-
-# Function to implement the Black-Scholes model 
-black_scholes <- function(S_t, K, r, tau, sigma, put=FALSE){
-  # Calculates a Call (or Option) price using Black-Scholes
-  # INPUTS
-  #   S_t:     [numeric] Current value of underlying asset price
-  #   K:       [numeric] Strike Price
-  #   r:       [numeric] risk-free rate 
-  #   tau:     [numeric] T- t, where T=maturity, and t=current time
-  #   sigma:   [numeric] Implied volatility (i.e. sigma)
-  #   put:     [logical] if TRUE, calculate a Put, if FALSE, calculate a Call. 
-  #            FALSE by default (Call). 
-  # 
-  # OUTPUTS: 
-  #   P or C: [numeric] Option value according to Black-scholes
-  
-  # calculate d1 & d2
-  d1 <- get_d1(S_t, K, tau, r, sigma)
-  d2 <- get_d2(d1, sigma, tau)
-  
-  if(put==TRUE){ 
-    # calculate a Put option 
-    P <- K*exp(-r*tau)*(1 - pnorm(d2)) - S_t * (1 - pnorm(d1))
-    P <- as.numeric(P)
-    return( round(P,6))
-  }
-  # else calculate a Call option (default) 
-  C <- S_t * pnorm(d1) - K*exp(-r*tau) * pnorm(d2)
-  return( round(as.numeric(C),6) )
-}
+# source code with options pricign
+source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
 
 # Test: Call Option 
 S_t = 1540
@@ -341,29 +290,7 @@ Find the price of this book given **the last underlying price** and the **last i
 This function will obtain the two nearest values $a, b$ for a number $x$ in a vector $v$, such that $a<x<b$. 
 
 ```{r}
-# Obtain the two nearest values of x in vec.
-get_nearest<- function(x, vec){ 
-  # find all the numbers that are bigger and smaller than x in vec 
-  bigger <- vec >= x 
-  smaller <- vec <= x
-  
-  # filter only values with TRUE 
-  bigger <- bigger[bigger == TRUE]
-  smaller <- smaller[smaller == TRUE]
-  
-  # obtain the indexes for the left and upper bound
-  a_idx <- length(smaller)
-  b_idx <- length(smaller)+1
-  
-  # retrieve values from original vector 
-  a <- vec[a_idx]
-  b <- vec[b_idx]
-  
-  # return the retrieved values 
-  return( c(a,b) )
-}
-
-# Test 
+# Test: function used to get two nearest values in a vector (OptionsPricing.R)
 days <- rf_mat[, "days"]
 get_nearest(40, rf_mat[, "days"]) # nearest day values 
 ```
@@ -399,114 +326,12 @@ head(calls)
 
 ex.: **1x** strike $K=1600$ with maturity $T=20d$ 
 
-```{r}
-price_option <- function(T, K, calls, rf_mat, stock=NULL, S_t=NULL, IV = NULL, put=FALSE){ 
-  # Calculates the price of an European option using input parameters
-  # INPUTS
-  #   T:        [numeric] maturity of option (in days)
-  #   K:        [numeric] Strike Price
-  #   calls:    [matrix] matrix containing information about tau and IV for different strike prices
-  #   rf_mat:       [matrix] matrix containing risk-free term structure
-  #   stock:     [xts OR zoo like object] object containing stock prices for a single stock
-  #   S_t:      [numeric] Specific price at time t 
-  #   IV:    [float] Implied volatility of the underlying 
-  #   put:     [logical] if TRUE, calculate a Put, if FALSE, calculate a Call. 
-  #            FALSE by default (Call). 
-  # 
-  # OUTPUTS: 
-  #   LIST containing: 
-  #     - P or C: [numeric] Option value according to Black-scholes and available information
-  #     - r_interp: [numeric] Interpolated risk-free rate given risk-free term structure
-  #     - calls [matrix] relevant set of calls information 
-  #     - rates [matrix] relevant set of risk-free rates used for the interpolation
-  
-  # Sanity check 
-  if(!is.matrix(calls) | !('tau_days' %in% colnames(calls)) ){
-    stop("calls should be a matrix with columns c('K', 'tau', 'IV', 'tau_days')")
-  }
-  
-  # Inputs
-  sigma <- NA
-  tau = T/250 # days --> years 
-  days_calls <- calls[,"tau_days"] # extract days column
-  days_rf <- rf_mat[, "days"] # extract days from rf_mat
-  
-  # extract the calls values 
-  ab <- get_nearest(T, days_calls) # search lower and upper nearest days to T
-  valid_days <- calls[, "tau_days"] == ab[1] | calls[, "tau_days"] == ab[2] # where match
-  calls_sub <- calls[ valid_days,  ] # subset valid rows
-  calls_sub <- calls_sub[calls_sub[,"K"]==K, ] # subset matching K 
-  
-  # test whether matrix is empty (i.e. no matching K found)
-  if(all(is.na(calls_sub))){
-    warning("No values matching K in Calls data\n")
-  }
-
-  # extract interpolated risk rates 
-  ab <- get_nearest(T, days_rf) # obtain nearest days to T available in rf_mat 
-  valid_days_rf <- rf_mat[, "days"] == ab[1] | rf_mat[, "days"] == ab[2] # where match
-  rates <- rf_mat[valid_days_rf, ] # subset for valid days 
-
-  # interpolate risk free rate for Option given maturity 
-  r <- interpolate(tau, 
-                   x1=rates[1,2], 
-                   y1=rates[1,1], 
-                   x2=rates[2,2], 
-                   y2=rates[2,1])
-
-  # use provided sigma by default, else calculate from calls matrix
-  if(is.null(IV)){
-    
-    # retrieve implied volatility for option 
-    if(is.matrix(calls_sub)){
-      # average between lower and upper values 
-      sigma <- (calls_sub[1, "IV"] + calls_sub[2, "IV"])/2
-      
-    } else{
-      # retrive from numeric vector (single match)
-      sigma <- calls_sub["IV"]
-    }
-    
-  }
-  else{ 
-    # rename for convenience
-    sigma <- IV
-  }
-  
-  # if price at t is not provided
-  if(is.null(S_t) & !is.null(stock)){
-    # retrieve last price for option from input index
-    warning("Using last day's S_t from input index\n")
-    S_t <- as.numeric( stock[length(stock)])
-  }
-  
-  # Calculate Option price 
-  if(put==TRUE){
-    C <- NA
-    P <- black_scholes(S_t, K, r, tau, sigma, put=TRUE)
-  }
-  else{ 
-    C <- black_scholes(S_t, K, r, tau, sigma, put=FALSE)
-    P <- NA
-  }
-  
-  # pack everything into a List and return 
-  return(list(Call = C, 
-              Put = P, 
-              S = as.numeric(S_t)[[1]], 
-              K = K, 
-              r_interp = r, 
-              calls = calls_sub, # subset of calls used
-              rates = rates # subset of rates used 
-              ))
-}
-```
 
 ```{r}
 S_t = sp500[length(sp500)] # last price of underlying 
 IV = vix[length(vix)] # last volatility 
 
-## test: specific price 
+## test: specific price (func from OptionPricing.R)
 price_option(T=20, K=1600, calls = calls, rf_mat =  rf_mat, stock = NA, S_t = S_t, IV = IV)
 ```
 
@@ -619,82 +444,6 @@ Assumptions:
 - Marginal Student-t distributions 
 - Disregard time dependence in the bootstrapping process 
 
-
-```{r,message=FALSE}
-# Load required libraries 
-library("fGarch")
-library("MASS")
-library("copula")
-library("Matrix")
-
-# random seed for replication 
-set.seed(123)
-
-##############################
-### Setup & Initialization ###
-##############################
-
-# Simulation parameters
-n_sim = 10 # set number of simulations
-n_ahead = 5 # days aheade to produce samples 
-
-# preallocate matrices to store simulations
-sim_rets_sp500 <- matrix(NA, nrow = n_sim, ncol=5)
-sim_rets_vix <- matrix(NA, nrow = n_sim, ncol=5)
-
-# assign days ahead 
-colnames(sim_rets_sp500) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-colnames(sim_rets_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-# 
-# #########################
-# ### Fitting the model ###
-# #########################
-# 
-# ##  Fit a Gaussian Copula to model the dependence 
-# 
-# # calculate the mean vector 
-# mu <- c(mean(sp500_rets), mean(vix_rets))
-# 
-# # calculate the covariance 
-# r <- cor(sp500_rets, vix_rets)[[1]] # correlation coefficient 
-# sig <- c(sd(sp500_rets), sd(vix_rets)) # standard deviation
-# R <- matrix(data = c(1, r, r, 1), # correlation matrix
-#             nrow = 2,
-#             ncol = 2,
-#             byrow = TRUE)
-# Sigma <- diag(sig) %*% R %*% diag(sig) # covariance matrix
-# Sigma <- (Sigma + t(Sigma)) / 2
-# Sigma <- as.matrix(nearPD(Sigma)$mat)
-# 
-# ##############################
-# ### Running the simulation ###
-# ##############################
-# 
-# # perform simulations 
-# for(i in 1:n_sim){
-#   
-#   # Sample 5-days ahead from Gaussian Copula
-#   Z <- mvrnorm(n = n_ahead, mu = mu, Sigma = Sigma)
-# 
-#   # Draws from Gaussian Copula
-#   U1 <- pnorm(q = Z[, 1], mu[1], sig[1]) # first dimension (sp500)
-#   U2 <- pnorm(q = Z[, 2], mu[2], sig[2]) # second dimension  (vix)
-#   
-#   # Model marginals with student-t distributions & sample
-#   # X1 <- qt(U1, df = 10) # simulated sp500
-#   # X2 <- qt(U2, df = 5) # simulated vix
-#   X1 <- qstd(U1, mean = mu[1], sd = sig[1],  nu = 10) # simulated sp500
-#   X2 <- qstd(U2, mean = mu[2], sd = sig[2], nu = 5) # simulated vix
-#   
-#   # store simulation of log return in matrix 
-#   sim_rets_sp500[i, ] <- X1 
-#   sim_rets_vix[i ,] <- X2
-# }
-# 
-# # preview of simulated log returns 
-# head(sim_rets_sp500)
-# head(sim_rets_vix)
-```
 
 ```{r, warning=FALSE}
 # Load required libraries 
@@ -1104,9 +853,373 @@ opt2_VaR_ES$ES
 opt3_VaR_ES$ES
 ```
 
+# Full Approach 
+
+1. Filter the volatility clustering of the log-returns of the underlying using a GARCH(1,1) model with Normal innovations. Use the residuals as invariants. 
+2. Take and AR(1) model for the log-returns of the VIX. Use the residuals as invariants.
+3. Use normal marginals for the invariants and a normal copula.
+4. Generate draws for the invariants, compute next week (five days) values and reprice the portfolio.
+5. Compute the VaR95 and ES95.
+
+**Log returns of the underlying** 
+
+```{r, message=FALSE}
+# load reqruired libraries 
+library("PerformanceAnalytics")
+
+# calculate returns
+sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
+vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
+
+# remove first return 
+sp500_rets <- sp500_rets[-1] 
+vix_rets <- vix_rets[-1]
+
+# remove nas 
+sp500_rets[is.na(sp500_rets)] <- 0
+vix_rets[is.na(vix_rets)] <- 0
+
+# display
+head(sp500_rets) 
+head(vix_rets)
+```
+
+### GARCH(1,1) Model 
+
+**Model specification**
+
+$$
+\begin{aligned} 
+y_{t} &= \epsilon_{t} \sigma_{t}, \\ 
+\sigma^{2}_{t} &= \omega \; + \; \alpha y_{t-1}^2 + \beta \sigma_{t-1}^{2} \\  
+\epsilon_{t} &\overset{i.i.d.}{\sim} \mathcal{N}(0,1), 
+\end{aligned}
+$$
+**Mean and variance**
+
+$$
+\begin{aligned}
+\mathbb{E}[Y_{t}] &\approx 0 \\ 
+\mathbb{V}ar[Y_{t}] &= \mathbb{E}[\epsilon^{2}_{t}] = \mathbb{E}[\sigma^{2}_{t}] = \dfrac{\omega}{(1 - \alpha - \beta)}
+\end{aligned}
+$$
+
+**Stationarity Conditions**
+
+$$
+\begin{aligned}
+\omega &\geq 0 \\ 
+\alpha\;,\; \beta &> 0 \\
+\alpha + \beta &< 1 \;\;\;\text{(Covariance-Stationary)} 
+\end{aligned}
+$$
+
+**VaR**
+
+$$
+VaR_Y(\alpha) = \Phi^{-1}(1 - \gamma)\sigma_{t}, 
+$$
+
+**Log-likelihood**
+
+$$
+\ln L(\theta|\mathbf{y})
+=
+- \dfrac{T}{2} \ln (2\pi) - \sum_{t=1}^{T}\ln{\sigma^{2}_{t}} - \dfrac{1}{2}\sum_{t=1}^{T} \dfrac{y_t^2}{\sigma^{2}_{t}}.
+$$
+
+## Volatility clustering of the log-returns of the underlying with GARCH(1,1) 
+
+
+Which indicates a high level of autocorrelation in the returns. 
+
+**Fitting the GARCH(1,1)**
+
+```{r}
+# source code for garch 
+source(here("code", "GARCH.R")) # GARCH model implementation
+
+# Estimate the GARCH(1,1) model
+fit_garch <- f_optim(sp500_rets)
+```
+
+**Inpect the parameters**
+
+```{r}
+# extract parameters (omega, alpha, beta)
+theta_hat_garch <- fit_garch$theta_hat
+theta_hat_garch
+```
+
+**Verify stationarity**
+
+```{r}
+# make sure stationarity is satisfied 
+sum(theta_hat_garch[2:3])
+```
+
+**Mean Squared Error** 
+```{r}
+# MSE ? 
+sqrt(theta_hat_garch[1] / (1 - sum(theta_hat_garch[2:3]))) * sqrt(250)
+
+# sd of returns annualized?
+sd(sp500_rets) * sqrt(250)
+```
+***Residuals***
+
+The residuals are given by: 
+
+$$\hat{\epsilon}_t = \dfrac{y_t}{\hat{\sigma}_t}$$
+
+```{r}
+# extrct the residuals
+sp500_resids <- fit_garch$eps_hat
+
+# inspect their mean and variance 
+mean(sp500_resids)
+sd(sp500_resids)
+```
+```{r}
+# Look at dependence in the residuals
+par(mfrow = c(2,2))
+
+# Eps_hat = Innovations Series
+plot(sp500_resids, pch = 20)
+
+# autocorr of innovations 
+acf(sp500_resids)
+
+# autocorr of the absolute values 
+acf(abs(sp500_resids))
+
+# autocorr of the variance of the innovations 
+acf(sp500_resids^2)
+```
+
+## AR(1) for the log-returns of the VIX
+
+**First-order Autoregressive Process AR(1)**
+
+- Let $\{\varepsilon_t\}$ be a mean-zero white noise process with variance $\sigma^{2}$. 
+- Consider a process $\{X_{t}\}$, independent of $\{\varepsilon_t\}$. 
+- Let $\phi$ be constant. 
+
+The \textbf{AR(1) process} satisfies:
+
+$$
+X_{t} = \phi X_{t-1} + \varepsilon_{t}
+$$
+
+It can be shown that: 
+
+$$
+\mu_X(t) = \mathbb{E}[X_t] = \phi\mu_X(t-1) = 0 \;\;\;\;,\forall t
+$$
+when the process is stationary, and the autocovariance function $\gamma_X(h)$ with alg $h$ and autocorrelation $\rho_X(h)$ are given by
+
+$$
+\gamma_X(h) = \dfrac{\phi^{|h|}\sigma^2}{1 - \phi^2} \;\;\;\;\text{and}\;\;\;\; \rho_X(h) = \phi^{|h|}
+$$
+
+**VIX log-returns** 
+
+```{r}
+library("forecast")
+# Construct an AR(1) model to the vix 
+vix_ar1 <- ar(vix_rets, order.max = 1) 
+vix_ar1$ar # phi coefficient 
+```
+**Stationarity of the residuals & underlying normality** 
+
+```{r}
+# extract the residuals 
+vix_resids <- vix_ar1$resid
+vix_resids[1] <- 0 # first residual is NA
+head(vix_resids)
+```
+
+
+```{r}
+checkresiduals(vix_ar1, main="Residuals for AR(1) Model")
+```
+
+## Normal Copula with Normal Marginals for the Invariants 
+
+### Bivariate Gaussian Copula
+
+Recall that the bivariate Gaussian copula is given by: 
+
+$$
+C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(\Phi^{-1}(u), \Phi^{-1}(v)). \;\impliedby\; H(x,y) = C(F(x), G(y))
+$$
+$$
+C^{\text{Gauss}}_{\rho}(u,v) = 
+\int_{-\infty}^{\Phi^{-1}(u)}\int_{-\infty}^{\Phi^{-1}(v)}
+\dfrac{1}{2\pi \sqrt{1-\rho^{2}}}
+\exp\left( - \dfrac{x^2 - 2\rho xy + y^2}{2(1 - \rho^2)}  \right)
+dx dy
+$$
+
+### Gaussian marginals to the invariants 
+
+```{r}
+# invariants are the residuals 
+sp500_resids <- as.vector(sp500_resids)
+vix_resids <- as.vector(vix_resids)
+
+# display some values 
+head(sp500_resids, 10) 
+head(vix_resids, 10)
+```
+
+
+```{r}
+## Fit marginals by MLE
+
+# Gaussian for sp500
+fit1 <- suppressWarnings(
+  fitdistr(x = sp500_resids, 
+           densfun = dnorm,
+           start = list(mean = 0, sd = 1))
+  )
+theta1 <- fit1$estimate #extract fitted parameters
+
+# Gaussianfor vix
+fit2 <- suppressWarnings(
+  fitdistr(x = vix_resids, 
+           densfun = dnorm,
+           start = list(mean = 0, sd = 1))
+  )
+theta2 <- fit2$estimate # extract fitted parameters
+
+# display parameters
+theta1
+theta2
+```
+```{r}
+# Fit a Gaussian to the marginals
+U1 <- pnorm(sp500_rets_vec, mean = theta1[1], sd = theta1[2]) # sp500
+U2 <- pnorm(vix_rets_vec,mean = theta2[1], sd = theta2[2]) # vix
+U <- cbind(U1, U2) # join into one matrix
+plot(U,
+     pch = 20, cex = 0.9, 
+     main="Gaussian Marginals Fitted to residuals",
+     xlab="Gaussian fitted to GARCH(1,1) SP500 residuals", 
+     ylab="Gaussian fitted to AR(1) VIX residuals"
+     )
+```
+
+### Fitting the Gaussian Copula 
+
+```{r}
+# Obtain the best rho for the Gaussian Copula
+C <- normalCopula(dim = 2)
+fit <- fitCopula(C, data = U, method = "ml")
+fit
+```
+
+### Simulating the invariants with the Copula 
+
+
+```{r}
+# random seed for replication 
+set.seed(69)
+
+##############################
+### Setup & Initialization ###
+##############################
+
+# Simulation parameters
+n_sim = 10000 # set number of simulations
+n_ahead = 5 # days ahead to produce samples 
+
+# preallocate matrices to store simulations
+sim_inv_sp500 <- matrix(NA, nrow = n_sim, ncol=5)
+sim_inv_vix <- matrix(NA, nrow = n_sim, ncol=5)
+
+# assign days ahead 
+colnames(sim_inv_sp500) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+colnames(sim_inv_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+
+##############################
+### Running the simulation ###
+##############################
+
+# perform n_head days of n_sim scenarios
+for(t in 1:n_ahead){
+
+  # Sample n_sim scenarios from Gaussian Copula
+  U_sim <- rCopula(n_sim, fit@copula)
+  
+  # use copula U_sim to reproduce the marginals quantiles F^{-1}(u) with Gaussian distr
+  inv1_sim <- qnorm(U_sim[,1], mean = theta1[1], sd = theta1[2]) # sp500
+  inv2_sim <- qnorm(U_sim[,2], mean = theta2[1], sd = theta2[2]) # vix
+  invs_sim <- cbind(rets1_sim, rets2_sim)
+  
+  # store simulation of log return in matrix
+  sim_inv_sp500[ ,t] <- inv1_sim
+  sim_inv_vix[ ,t] <- inv2_sim
+}
+
+# preview of simulated invariants
+head(sim_inv_sp500)
+head(sim_inv_vix)
+```
+
+
+### Transforming back the invariants to prices 
+
+**From GARCH(1,1) residuals to SP500 observations** 
+
+$$
+\hat{\epsilon}_t = \dfrac{y_t}{\hat{\sigma}_t}
+\implies 
+\hat{y_t} = \hat{\epsilon}_t\hat{\sigma}_t
+$$
+
+and 
+
+$$
+\sigma^{2}_{t} = \omega \; + \; \alpha y_{t-1}^2 + \beta \sigma_{t-1}^{2}
+$$
+
+First, obtain last conditional variance available (up to time T): 
+
+```{r}
+# extrct the residuals
+sp500_resids <- fit_garch$eps_hat
+
+# compute the 
+```
 
 
 
+
+
+**From AR(1) residuals to VIX observations** 
+
+$$
+X_{t} = \phi X_{t-1} + \varepsilon_{t}
+$$
+
+
+
+
+
+
+
+### Other stuff
+
+
+$$
+\begin{aligned}
+\overset{\rightarrow}{\alpha}^{*} &=  \underset{\overset{\rightarrow}{\alpha}}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - \sigma(m .\tau)\right| \\ 
+&= \underset{\alpha_1, \alpha_2, \alpha_3, \alpha_4}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - 
+\left( \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}  \right)
+\right|
+\end{aligned}
+$$
 
 
 

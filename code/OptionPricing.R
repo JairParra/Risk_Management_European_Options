@@ -62,13 +62,13 @@ black_scholes <- function(S_t, K, r, tau, sigma, put=FALSE){
   
   if(put==TRUE){ 
     # calculate a Put option 
-    P <- S_t * pnorm(d1) - K*exp(r*tau) * pnorm(d2)
+    P <- K*exp(-r*tau)*(1 - pnorm(d2)) - S_t * (1 - pnorm(d1))
     P <- as.numeric(P)
-    return(P)
+    return( round(P,6))
   }
   # else calculate a Call option (default) 
-  C <- K*exp(r*tau)*(1 - pnorm(d2)) - S_t * (1 - pnorm(d1))
-  return( as.numeric(C) )
+  C <- S_t * pnorm(d1) - K*exp(-r*tau) * pnorm(d2)
+  return( round(as.numeric(C),6) )
 }
 
 # # Test: Call Option 
