@@ -60,13 +60,13 @@ f_next_Pt <- function(Pt, log_Rt_next){
   #### Wrapper for price_option for two vectors of prices and volatilities 
   # 
   # INPUTS
-  #   Pt:           [numeric] Price of underlying at time t  (aka P_{t})
+  #   Pt:           [numeric or vector] Price of underlying at time t  (aka P_{t})
   #   log_Rt_next:  [vector numeric] vector of simulated log returns at time t+1 (aka log(R_{t+1}) )
   # 
   # OUTPUTS: 
   #   opt prices: [numeric vector] vector of prices computed from current underlying price Pt and 
   #               the log returns for the next day ahead R_{t+1}, via the formula: 
-  #                P_{t+1} = exp( log(R_{t+1}) +  log(P_{t}) ) _ P_{t}
+  #                P_{t+1} = exp( log(R_{t+1}) +  log(P_{t}) ) 
   
   # compute the log of Pt 
   log_Pt <- log(Pt)

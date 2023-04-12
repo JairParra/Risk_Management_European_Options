@@ -47,7 +47,7 @@ f_nll <- function(theta, y) {
 ##############################
 
 # Optimize the variance with constraints 
-f_optim <- function(y) {
+f_optim_garch <- function(y) {
   
   theta0 <- c(0.1 * var(y), 0.1, 0.8) # initial parameters 
   LB     <- c(0, 1e-7, 1e-7) # lower bound limits (1e-7 for numerical stability)
@@ -96,4 +96,43 @@ f_sim <- function(theta, eps) {
   }
   
   return(y_sim)
+}
+
+############################
+### 5. Forecasting ####
+############################
+
+
+# function to forecast from previous observations
+f_forecast_y <- function(theta, sig2_prev, y_prev, resids_next) {
+  # Produces step-ahead values for the 
+  # INPUTS
+  #   theta:      [vector] fitted GARCH(1,1) model parameters
+  #   sig2_prev:  [numeric] last available conditional variance to start predicting with 
+  #   y_prev:     [numeric] last available observation from ground data (e.g. index, stock) 
+  #   resids_next:  [vector] vector of simulated residuals from some model (e.g. Copula)
+  # 
+  # OUTPUTS: 
+  #   y_next:   [vector] vector of forecasted y values using inputs. 
+  
+  
+  steps <- length(resids_next)
+  sig2 <- rep(NA, steps) # create a vector to store the cond. vars
+  y_next <- rep(NA, steps)
+  
+  # calculate first conditional variance and y_forecast (given last step)
+  sig2[1] <- theta[1] + theta[2] * y_prev^2 + theta[3] * sig2_prev
+  y_next[1] <- resids_next[1]*sig2[1]
+  
+  
+  # compute subsequent cond. variances and y_nextusing model formula
+  for (t in 2:steps) {
+    sig2[t] <- theta[1] + theta[2] * y_next[t-1]^2 + theta[3] * sig2[t-1]
+    y_next[t] <- resids_next[t]*sig2[t]
+  }
+  
+  # return the forecasted values and conditional variances 
+  return(list(resids_next = resids_next, 
+              sig2_next = sig2, 
+              y_next = y_next))
 }

@@ -603,11 +603,7 @@ R_{t} = \dfrac{P_{t} - P_{t-1}}{P_{t-1}} \\
 \implies P_{t+1} = \exp(\log(R_{t+1})+ \log(P_{t}) )
 \end{aligned}
 $$
-Since: 
 
-$$
-\exp\log(R_{t}) + \log(P_{t-1}) = \log(R_{t} \cdot P_{t-1})
-$$
 
 
 ```{r}
@@ -636,8 +632,8 @@ for(t in 2:n_ahead){
   Rt_vix <- sim_rets_vix[, t]
   
   # compute and assign next price ahead using current returns
-  sim_val_mats$sp500[, t] <- f_next_Pt(Pt_prev_sp500, Rt_sp500)
-  sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix)
+  sim_val_mats$sp500[, t] <- f_next_Pt(Pt_prev_sp500, Rt_sp500) 
+  sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix) 
   
 }
 
@@ -940,7 +936,7 @@ Which indicates a high level of autocorrelation in the returns.
 source(here("code", "GARCH.R")) # GARCH model implementation
 
 # Estimate the GARCH(1,1) model
-fit_garch <- f_optim(sp500_rets)
+fit_garch <- f_optim_garch(sp500_rets)
 ```
 
 **Inpect the parameters**
@@ -997,6 +993,8 @@ acf(abs(sp500_resids))
 acf(sp500_resids^2)
 ```
 
+## Fitting GARCH(1,1) with mean 
+
 ## AR(1) for the log-returns of the VIX
 
 **First-order Autoregressive Process AR(1)**
@@ -1041,6 +1039,7 @@ head(vix_resids)
 
 
 ```{r}
+# comes from the forecast package
 checkresiduals(vix_ar1, main="Residuals for AR(1) Model")
 ```
 
@@ -1075,9 +1074,10 @@ head(vix_resids, 10)
 
 
 ```{r}
+library("MASS")
 ## Fit marginals by MLE
 
-# Gaussian for sp500
+# Gaussian for sp500 invariants (from the GARCH(1,1))
 fit1 <- suppressWarnings(
   fitdistr(x = sp500_resids, 
            densfun = dnorm,
@@ -1085,7 +1085,7 @@ fit1 <- suppressWarnings(
   )
 theta1 <- fit1$estimate #extract fitted parameters
 
-# Gaussianfor vix
+# Gaussian for vix invariants (from the AR(1))
 fit2 <- suppressWarnings(
   fitdistr(x = vix_resids, 
            densfun = dnorm,
@@ -1181,55 +1181,96 @@ $$
 and 
 
 $$
-\sigma^{2}_{t} = \omega \; + \; \alpha y_{t-1}^2 + \beta \sigma_{t-1}^{2}
+\begin{cases}
+\sigma^{2}_{t} = \omega \; + \; \alpha y_{t-1}^2 + \beta \sigma_{t-1}^{2} \\ 
+\hat{y_t} = \hat{\epsilon}_t\hat{\sigma}_t \\ 
+\end{cases}
+$$
+
+$$
+\begin{cases}
+\sigma^{2}_{T+1} = \omega \; + \; \alpha y_{T}^2 + \beta \sigma_{T}^{2} \\ 
+\hat{y_{T+1}} = \hat{\epsilon}_{T+1}\hat{\sigma}_{T+1} \\ 
+\vdots \\ 
+\sigma^{2}_{T+t} = \omega \; + \; \alpha y_{T+t-1}^2 + \beta \sigma_{T+t-1}^{2} \\ 
+\hat{y_{T+t}} = \hat{\epsilon}_{T+t}\cdot\hat{\sigma}_{T+t} \\ 
+\end{cases}
 $$
 
 First, obtain last conditional variance available (up to time T): 
 
 ```{r}
 # recall the fitted GARCH parameters
-theta_hat_garch
+theta <- theta_hat_garch
 
 # function to forecast from previous observations
-f_forecast_sig2 <- function(theta, sig2_prev, y_prev, y_vec, steps=5) {
+f_forecast_y <- function(theta, sig2_prev, y_prev, resids_next) {
+  # Produces step-ahead values for the 
+  # INPUTS
+  #   theta:      [vector] fitted GARCH(1,1) model parameters
+  #   sig2_prev:  [numeric] last available conditional variance to start predicting with 
+  #   y_prev:     [numeric] last available observation from ground data (e.g. index, stock) 
+  #   resids_next:  [vector] vector of simulated residuals from some model (e.g. Copula)
+  # 
+  # OUTPUTS: 
+  #   y_next:   [vector] vector of forecasted y values using inputs. 
   
+  
+  steps <- length(resids_next)
   sig2 <- rep(NA, steps) # create a vector to store the cond. vars
+  y_next <- rep(NA, steps)
   
-  # calculate first conditional variance (given last step)
+  # calculate first conditional variance and y_forecast (given last step)
   sig2[1] <- theta[1] + theta[2] * y_prev^2 + theta[3] * sig2_prev
+  y_next[1] <- resids_next[1]*sig2[1]
   
-  # compute subsequent cond. variances using model formula
-  for (i in 2:steps) {
-    sig2[i] <- theta[1] + theta[2] * y_vec[i-1]^2 + theta[3] * sig2[i-1]
+  
+  # compute subsequent cond. variances and y_nextusing model formula
+  for (t in 2:steps) {
+    sig2[t] <- theta[1] + theta[2] * y_next[t-1]^2 + theta[3] * sig2[t-1]
+    y_next[t] <- resids_next[t]*sig2[t]
   }
   
-  # return 
-  return(sig2)
+  # return the forecasted values and conditional variances 
+  return(list(resids_next = resids_next, 
+              sig2_next = sig2, 
+              y_next = y_next))
 }
 ```
 
 ```{r}
 # data from up to T 
 y <- sp500_rets_vec
-sig2 <- fit_garch$sig2_hat 
-theta <- fit_garch$theta_hat 
+sig2 <- fit_garch$sig2_hat # vector of sig2 from GARCH 
+theta <- fit_garch$theta_hat # GARCH parameters 
 
 # initial parameters
-y_prev <- y[length(y)] 
-sig2_prev <- sig2[length(sig2)]
+y_prev <- y[length(y)] # last sp500 observation
+sig2_prev <- sig2[length(sig2)] # last sig2_T
 
 # residuals forecasted from copula (invariants)
 garch_resids_next <- sim_inv_sp500
-# 
-# sp500_resids <- fit_garch$eps_hat
+resids_next <- garch_resids_next[1, ] # example vector of residuals for prediction 
+
+# obtain 5days-ahead prediction for variance
+sig2_forecast <- f_forecast_y(theta = theta,
+                              sig2_prev = sig2_prev,
+                              y_prev = y_prev, 
+                              resids_next = resids_next)
+
+sig2_forecast
+```
+
+```{r}
+hist(sp500_rets, nclass=30)
+abline(v=sig2_forecast$y_next, col="blue")
 ```
 
 
 
-```{r}
-# extrct the residuals
-sp500_resids <- fit_garch$eps_hat
 
+```{r}
+plot(sig2_forecast$y_next, type="l")
 ```
 
 
@@ -1259,6 +1300,54 @@ $$
 \right|
 \end{aligned}
 $$
+
+$$
+\sigma(m,\tau) = \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}
+$$
+
+$$
+m = \dfrac{S}{K} 
+$$
+
+```{r}
+# obtain last price 
+S <- sp500[length(sp500)][[1]]
+
+# convert to draframe for easier manipulation 
+calls_df <- as.data.frame(calls)
+puts_df <- as.data.frame(puts)
+
+# assign extra column to puts (1) and calls (0)
+calls_df["type"] <- "call"
+puts_df["type"] <- "put"
+
+# check dimensions 
+dim(calls_df) 
+dim(puts_df)
+
+# stack both of these matrices together 
+puts_calls <- rbind(calls_df, puts_df) 
+
+# intergate the price 
+puts_calls["S"] <- S
+puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
+
+# filter the calls that have moniness over one 
+calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
+
+# filter the puts that have moniness below one
+puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
+
+# combine these results into putcalls again 
+call_put_data <- rbind(calls_m_over, puts_m_under)
+head(call_put_data)
+```
+
+
+
+
+
+
 
 
 
