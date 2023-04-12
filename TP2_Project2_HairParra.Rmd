@@ -939,6 +939,21 @@ source(here("code", "GARCH.R")) # GARCH model implementation
 fit_garch <- f_optim_garch(sp500_rets)
 ```
 
+```{r}
+## Aside: If we had used the MSGARCH package 
+
+# load MSGARCH
+library("MSGARCH")
+# GARCH with NOrmal innovations
+garch_n <- MSGARCH::CreateSpec(variance.spec = list(model = c("sGARCH")),
+                               distribution.spec = list(distribution = c("norm")))
+fit_garch_n <- MSGARCH::FitML(spec = garch_n, data = sp500_rets)
+
+#check the fit 
+summary(fit_garch_n)
+```
+
+
 **Inpect the parameters**
 
 ```{r}
@@ -1168,9 +1183,9 @@ head(sim_inv_vix)
 ```
 
 
-### Transforming back the invariants to prices 
+### Transforming back the invariants to returns
 
-**From GARCH(1,1) residuals to SP500 observations** 
+**From GARCH(1,1) residuals to SP500 returns** 
 
 $$
 \hat{\epsilon}_t = \dfrac{y_t}{\hat{\sigma}_t}
@@ -1199,46 +1214,11 @@ $$
 
 First, obtain last conditional variance available (up to time T): 
 
-```{r}
-# recall the fitted GARCH parameters
-theta <- theta_hat_garch
-
-# function to forecast from previous observations
-f_forecast_y <- function(theta, sig2_prev, y_prev, resids_next) {
-  # Produces step-ahead values for the 
-  # INPUTS
-  #   theta:      [vector] fitted GARCH(1,1) model parameters
-  #   sig2_prev:  [numeric] last available conditional variance to start predicting with 
-  #   y_prev:     [numeric] last available observation from ground data (e.g. index, stock) 
-  #   resids_next:  [vector] vector of simulated residuals from some model (e.g. Copula)
-  # 
-  # OUTPUTS: 
-  #   y_next:   [vector] vector of forecasted y values using inputs. 
-  
-  
-  steps <- length(resids_next)
-  sig2 <- rep(NA, steps) # create a vector to store the cond. vars
-  y_next <- rep(NA, steps)
-  
-  # calculate first conditional variance and y_forecast (given last step)
-  sig2[1] <- theta[1] + theta[2] * y_prev^2 + theta[3] * sig2_prev
-  y_next[1] <- resids_next[1]*sig2[1]
-  
-  
-  # compute subsequent cond. variances and y_nextusing model formula
-  for (t in 2:steps) {
-    sig2[t] <- theta[1] + theta[2] * y_next[t-1]^2 + theta[3] * sig2[t-1]
-    y_next[t] <- resids_next[t]*sig2[t]
-  }
-  
-  # return the forecasted values and conditional variances 
-  return(list(resids_next = resids_next, 
-              sig2_next = sig2, 
-              y_next = y_next))
-}
-```
 
 ```{r}
+# load source code with GARCh custom functions
+source(here("code", "GARCH.R")) # display the pdf through a 3-d chart
+
 # data from up to T 
 y <- sp500_rets_vec
 sig2 <- fit_garch$sig2_hat # vector of sig2 from GARCH 
@@ -1262,26 +1242,92 @@ sig2_forecast
 ```
 
 ```{r}
-hist(sp500_rets, nclass=30)
-abline(v=sig2_forecast$y_next, col="blue")
+# apply to all rows and pack into a matrix 
+sp500_sim_rets <- t(apply(sim_inv_sp500, 1, function(x){f_forecast_y(theta=theta, 
+                                                                     sig2_prev = sig2_prev, 
+                                                                     y_prev = y_prev, 
+                                                                     resids_next = x)$y_next}))
+colnames(sp500_sim_rets) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+head(sp500_sim_rets)
 ```
-
-
 
 
 ```{r}
-plot(sig2_forecast$y_next, type="l")
+# example 5-days ahead simulation vs actual values: 
+hist(sp500_rets, nclass=30)
+abline(v=sig2_forecast$y_next, col="blue")
+legend(x="topleft", 
+       legend = c("Copula sim. rets"),
+       col = c("blue"), 
+       lwd=rep(2, time=2))
 ```
-
-
-
 
 
 **From AR(1) residuals to VIX observations** 
 
+The AR(1) model specifies 
+
 $$
-X_{t} = \phi X_{t-1} + \varepsilon_{t}
+X_{t} = \phi X_{t-1} + \varepsilon_{t} \\
 $$
+therefore for the step ahead predictions
+
+$$
+\begin{cases}
+x_{T+1} = \phi x_{T} + \varepsilon_{T} \\
+x_{T+2} = \phi x_{T+1} + \varepsilon_{T+1} \\
+\vdots \\ 
+x_{T+t} = \phi x_{T+t-1} + \varepsilon_{T+t-1}
+\end{cases}
+$$
+
+
+
+
+### Transforming the  simulated returns into SP500 prices and VIX values 
+
+
+
+```{r}
+# data from up to T (VIX)
+x <- vix_rets_vec
+
+# initial parameters
+phi <- vix_ar1$ar
+x_prev <- x[length(x)] # last vix observation
+
+# residuals forecasted from copula (vix invariants)
+ar1_resids_next <- sim_inv_vix
+ar1_res_next <- ar1_resids_next[1, ] # example vector
+
+# forecast the vix values using the copula simulated residuals 
+ex_vix_forecast <- f_forecast_x(phi=phi, x_prev = x_prev, resids_next = ar1_res_next)
+ex_vix_forecast
+```
+
+
+```{r}
+# apply to all rows and pack into a matrix 
+vix_sim_rets <- t(apply(sim_inv_vix, 1, function(x){f_forecast_x(phi=phi,
+                                                                 x_prev = x_prev, 
+                                                                 resids_next = x)}))
+colnames(vix_sim_rets) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+head(vix_sim_rets)
+```
+
+
+```{r}
+# example 5-days ahead simulation vs actual values: 
+hist(vix_rets, nclass=40)
+abline(v=ex_vix_forecast, col="blue")
+legend(x="topleft", 
+       legend = c("Copula VIX sim. rets."),
+       col = c("blue"), 
+       lwd=rep(2, time=2))
+```
+
+
+
 
 
 

@@ -122,17 +122,42 @@ f_forecast_y <- function(theta, sig2_prev, y_prev, resids_next) {
   
   # calculate first conditional variance and y_forecast (given last step)
   sig2[1] <- theta[1] + theta[2] * y_prev^2 + theta[3] * sig2_prev
-  y_next[1] <- resids_next[1]*sig2[1]
+  y_next[1] <- resids_next[1]*sqrt(sig2[1])
   
   
   # compute subsequent cond. variances and y_nextusing model formula
   for (t in 2:steps) {
     sig2[t] <- theta[1] + theta[2] * y_next[t-1]^2 + theta[3] * sig2[t-1]
-    y_next[t] <- resids_next[t]*sig2[t]
+    y_next[t] <- resids_next[t]*sqrt(sig2[t])
   }
   
   # return the forecasted values and conditional variances 
   return(list(resids_next = resids_next, 
               sig2_next = sig2, 
               y_next = y_next))
+}
+
+
+f_forecast_x <- function(phi, x_prev, resids_next){
+  # Produces step-ahead values for the AR(1) using input simulated errors 
+  # INPUTS
+  #   phi:      [numeric] fitted GARCH(1,1) model parameters
+  #   resids_next:  [vector] vector of simulated residuals from some model (e.g. Copula)
+  # 
+  # OUTPUTS: 
+  #   y_next:   [vector] vector of forecasted x values using inputs and the AR(1) model 
+  
+  # initialize 
+  steps <- length(resids_next)
+  x_next <- rep(NA, steps)
+  
+  # obtain first value 
+  x_next[1] <- phi*x_prev + resids_next[1]
+  
+  # compute subsequent values in a loop 
+  for(t in 2:steps){
+    x_next[t] <- phi*x_next[t-1] + resids_next[t]
+  }
+  
+  return(x_next)
 }
