@@ -249,6 +249,122 @@ prc_opt <- function(T, K, calls, rf_mat, price_vec, vol_vec){
 }
 
 
+f_opt_price_simulation <- function(sim_price_sp500, sim_vol_vix, K_vec, T_vec, put=FALSE){
+  #### Computes Option prices (premiums) based on input simulation matrices, option prices and maturities 
+  # 
+  # INPUTS
+  #   sim_price_sp500:    [matrix] (n_sim x n_steps) matrix of simulated prices for the sp500 
+  #                       .It is assumed the n_steps represented the number of days ahead simulation. 
+  #   sim_vol_vix:        [matrix] (n_sim x n_steps) matrix of simulated volatilities for the vix
+  #   K_vec               [vector] vector of strike prices to compute 
+  #   T-vec               [vector] vector of maturities for each of the options
+  # 
+  # OUTPUT: 
+  #   mats:       [list of matrices] List containing three matrices of compatible sizes containing the 
+  #               option prices (premiums) for the corresponding prices and market volatilities (vix) 
+  
+  # safety check 
+  if(ncol(sim_price_sp500) != ncol(sim_vol_vix)) {
+    stop("Incompatible sim_price_sp500 and sim_vol_vix matrix sizes") 
+  }
+  if(length(K_vec) != length(T_vec)){
+    stop("Incompatible Strike vector and Maturities vector lengths")
+  }
+  
+  # unpack values 
+  n_ahead <- ncol(sim_price_sp500)
+  n_K <- length(K_vec) # num of options
+  
+  # generate option names for the list 
+  lnames <- as.vector(mapply(paste0, rep("opt", n_K), seq(1:n_K)))
+  
+  # Initialize empty matrices to store the simulated option prices (aka premiums)
+  opt_price_mats <- initialize_sim_mats(sim_price_sp500, 
+                                        lnames = lnames,
+                                        num_mats = n_K
+  )
+  
+  # looop through simulated prices (n_ahead days)
+  for(t in 1:n_ahead){
+    
+    # extract simulated prices for sp500 at T+t
+    prices_t <- sim_price_sp500[, t] 
+    
+    # extract implied volatility from vix at T+t 
+    vols_t <- sim_vol_vix[, t]
+    
+    # for every available strike and corresponding maturity (i.e. option)
+    for(j in 1:n_K){
+      # extract T and K  
+      T <- T_vec[j]
+      K <- K_vec[j]
+      opt_name <- lnames[j]
+      
+      
+      
+      # price first Call option
+      c_vec <- prc_opt(T-t, K, calls, rf_mat, prices_t, vols_t) # vec of premiums
+      opt_price_mats[[opt_name]][ ,t] <- c_vec # assign to matrix 
+    }
+    
+  }
+  
+  return(opt_price_mats)
+}
+
+
+f_pl_simulation <- function(sim_price_sp500, opt_price_mats, K_vec, put=FALSE){
+  #### Computes Profit and loss from the options(premiums) based on input simulation and option prices matrices
+  # 
+  # INPUTS
+  #   sim_price_sp500:    [matrix] (n_sim x n_steps) matrix of simulated prices for the sp500. 
+  #                       It is assumed the n_steps represented the number of days ahead simulation. 
+  #   opt_price_mats:     [list of matrices] List containing three matrices of compatible sizes containing the 
+  #                       option prices (premiums) for the corresponding prices and market volatilities (vix) 
+  #   K_vec               [vector] vector of strike prices to compute (for each of the options)
+  # 
+  # OUTPUT: 
+  #   PL_mats:            [list of matrices] Profit and loss matrices corresponding to each of the options 
+  
+  # unpack values 
+  n_ahead <- ncol(sim_price_sp500) # predition days ahead 
+  n_K <- length(K_vec) # num of options
+  
+  # generate option names for the list 
+  optnames <- names(opt_price_mats) # names of each of the options matrices 
+  plnames <- as.vector(mapply(paste0, rep("PL", n_K), seq(1:n_K)))
+  
+  # Matrices of profit and loss for each of the options simulations 
+  PL_mats <- initialize_sim_mats(sim_price_sp500, 
+                                 lnames = plnames,
+                                 num_mats = n_K
+  )
+  
+  # looop through simulated prices (n_ahead days)
+  for(t in 1:n_ahead){
+    
+    #spot price of underlying at day T+t
+    spot <- sim_price_sp500[, t]
+    
+    # for every available strike and corresponding maturity (i.e. option)
+    for(j in 1:n_K){
+      # extract T and K  
+      K <- K_vec[j]
+      pl_name <- plnames[j] # PL1, PL2, ...
+      opt_name <- optnames[j] # opt1, opt2, ...
+      
+      # Option profit for K at time T+t with premiums c (vector)
+      c <- opt_price_mats[[opt_name]][, t] # extract the premiums
+      PL_mats[[pl_name]][,t] <- option_profit(S=spot, K=K_vec[j], c=c)$call_profit
+    }
+    
+  }
+  
+  return(PL_mats)
+}
+
+
+
 ###############################################################################
 
 #########################

@@ -603,7 +603,7 @@ R_{t} = \dfrac{P_{t} - P_{t-1}}{P_{t-1}} \\
 \implies P_{t+1} = \exp(\log(R_{t+1})+ \log(P_{t}) )
 \end{aligned}
 $$
-
+This logic is implemented in the `f_logret_to_price()` function through the `f_next_Pt()` function, under the `code/Utils.R` script. 
 
 
 ```{r}
@@ -611,31 +611,12 @@ $$
 spT <- sp500[length(sp500)][[1]]
 vixT <- vix[length(vix)][[1]]
 
-# Initialize empty matrices for the simulated sp500 and vix values
-sim_val_mats <- initialize_sim_mats(sim_rets_sp500, 
-                                       lnames = c("sp500", "vix"), # <- this function comes from Utils.R
-                                       num_mats = 2
-                                       )
-
-# Initialize the first prices 
-sim_val_mats$sp500[, 1] <- f_next_Pt(spT, sim_rets_sp500[, 1])
-sim_val_mats$vix[, 1] <- f_next_Pt(vixT, sim_rets_vix[, 1])
-
-# for each day ahead
-for(t in 2:n_ahead){
-  # obtain the values for P_{t-1}
-  Pt_prev_sp500 <- sim_val_mats$sp500[, t-1] 
-  Pt_prev_vix <- sim_val_mats$vix[, t-1] 
-  
-  # extract current returns R_{t}
-  Rt_sp500 <- sim_rets_sp500[, t] 
-  Rt_vix <- sim_rets_vix[, t]
-  
-  # compute and assign next price ahead using current returns
-  sim_val_mats$sp500[, t] <- f_next_Pt(Pt_prev_sp500, Rt_sp500) 
-  sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix) 
-  
-}
+# calculate the price and values from the simulated log-returns 
+sim_val_mats <- f_logret_to_price(sp_init = spT,
+                                  vix_init = vixT, 
+                                  sim_rets_sp500 = sim_rets_sp500, 
+                                  sim_rets_vix = sim_rets_vix
+                                  )
 
 # unpack matrices 
 sim_price_sp500 <- sim_val_mats$sp500 
@@ -665,50 +646,33 @@ Recall the initial (call) options:
 
 **Option Pricing of Simulated Values**
 
-Next, we calculate the price of the book of options for the simulated values. 
+Next, we calculate the price of the book of options for the simulated values using the `f_opt_price_simulation()` function under `code/OptionPricing.R`: 
 
 ```{r}
 # random seed for replication 
 set.seed(123)
 
-# Initialize empty matrices to store the simulated option prices (aka premiums)
-opt_price_mats <- initialize_sim_mats(sim_price_sp500, 
-                                       lnames = c("opt1", "opt2", "opt3"),
-                                       num_mats = 3
-                                       )
+# Initialize strikes and maturities the options 
+T_vec <- c(20,40,40) #  maturities 
+K_vec <- c(1600, 1605, 1800) # Strikes 
 
-#  maturities for each of the options
-T1 <- 20
-T2 <- 40
-T3 <- 40
 
-# Strikes for the options 
-K1 <- 1600 
-K2 <- 1605 
-K3 <- 1800
+# Obtain the obtion prices from simulation values 
+opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500, 
+                                         sim_vol_vix = sim_vol_vix, 
+                                         K_vec = K_vec, 
+                                         T_vec = T_vec, 
+                                         put=FALSE)
 
-# looop through simulated prices (n_ahead days)
-for(t in 1:n_ahead){
-  
-  # extract simulated prices for sp500 at T+t
-  prices_t <- sim_price_sp500[, t] 
-  
-  # extract implied volatility from vix at T+t 
-  vols_t <- sim_vol_vix[, t]
-  
-  # price first Call option
-  c1_vec <- prc_opt(T1-t, K1, calls, rf_mat, prices_t, vols_t)
-  opt_price_mats$opt1[ ,t] <- c1_vec
-  # print(cbind(prices_t, vols_t, c1_vec)) # <-- uncomment for debugging
-  
-  # price first Call option
-  c2_vec <- prc_opt(T2-t, K2, calls, rf_mat, prices_t, vols_t)
-  opt_price_mats$opt2[ ,t] <- c2_vec
-  
-  # price first Call option
-  c3_vec <- prc_opt(T3-t, K3, calls, rf_mat, prices_t, vols_t)
-  opt_price_mats$opt3[ ,t] <- c3_vec
-}
+```
+
+
+
+```{r}
+# overview of dataframes
+head(opt_price_mats$opt1)
+head(opt_price_mats$opt2)
+head(opt_price_mats$opt3)
 ```
 
 ```{r}
@@ -748,34 +712,21 @@ $$
 
 **Calculating the profits** 
 
-For each of the simulated prices and resulting premiums, we want to calculate the profit generated at each simulation timestep: 
+For each of the simulated prices and resulting premiums, we want to calculate the profit generated at each simulation timestep. 
+The function used is `f_pl_simulation()`, found under `code/OptionPricing.R`. 
 
 ```{r}
-# Matrices of profit and loss for each of the options simulations 
-PL_mats <- initialize_sim_mats(sim_price_sp500, 
-                                       lnames = c("PL1", "PL2", "PL3"),
-                                       num_mats = 3
-                                       )
+# Initialize strikes and maturities the options 
+T_vec <- c(20,40,40) #  maturities 
+K_vec <- c(1600, 1605, 1800) # Strikes 
 
-# Calculate profit for all simulated options at each day ahead
-for(t in 1:n_ahead){
-  
-  #spot price of underlying at day T+t
-  spot <- sim_price_sp500[, t]
-  
-  # Option profit for K1 at time T+t with premiums c1
-  c1 <- opt_price_mats$opt1[, t] # extract the premiums
-  PL_mats$PL1[,t] <- option_profit(S=spot, K=K1, c=c1)$call_profit
-  
-  # Option profit for K1 at time T+t with premiums c1
-  c2 <- opt_price_mats$opt2[, t] # extract the premiums
-  PL_mats$PL2[,t] <- option_profit(S=spot, K=K2, c=c2)$call_profit
-  
-  # Option profit for K1 at time T+t with premiums c1
-  c3 <- opt_price_mats$opt3[, t] # extract the premiums
-  PL_mats$PL3[,t] <- option_profit(S=spot, K=K2, c=c3)$call_profit
-}
+# Compute the profits and loses for the simulation  from the simulated option premiums
+PL_mats <- f_pl_simulation(sim_price_sp500 = sim_price_sp500, 
+                           opt_price_mats = opt_price_mats, 
+                           K_vec = K_vec)
+
 ```
+
 
 ```{r}
 # display profit matrices 
@@ -788,7 +739,7 @@ head(PL_mats$PL3)
 
 Next, using all the simulated profits and losses for each of the options, we display a histogram for the distribution for each of the options, for the aggregated 5 days of simulation: 
 
-```{r fig.height=7, fig.width=7, fig.align='center'}
+```{r fig.height=7, fig.width=9, fig.align='center'}
 # flatten the matrices 5-days ahead simulated P/L for the three options 
 sim_pl_opt1 <- as.vector(PL_mats$PL1)
 sim_pl_opt2 <- as.vector(PL_mats$PL2)
@@ -821,6 +772,9 @@ abline(v=opt3_VaR_ES$VaR, col="red") # 95% VaR
 abline(v=opt3_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt3)
 ```
+
+These all look like multimodal distributions. The last one, particularly shows a different mode for each of the fives days computed. The 95% VaR (red) and ES (black) are all displayed in the plots. 
+
 
 ### VaR95
 
@@ -1043,6 +997,7 @@ library("forecast")
 vix_ar1 <- ar(vix_rets, order.max = 1) 
 vix_ar1$ar # phi coefficient 
 ```
+
 **Stationarity of the residuals & underlying normality** 
 
 ```{r}
@@ -1112,6 +1067,7 @@ theta2 <- fit2$estimate # extract fitted parameters
 theta1
 theta2
 ```
+
 ```{r}
 # Fit a Gaussian to the marginals
 U1 <- pnorm(sp500_rets_vec, mean = theta1[1], sd = theta1[2]) # sp500
@@ -1243,12 +1199,12 @@ sig2_forecast
 
 ```{r}
 # apply to all rows and pack into a matrix 
-sp500_sim_rets <- t(apply(sim_inv_sp500, 1, function(x){f_forecast_y(theta=theta, 
-                                                                     sig2_prev = sig2_prev, 
-                                                                     y_prev = y_prev, 
-                                                                     resids_next = x)$y_next}))
-colnames(sp500_sim_rets) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-head(sp500_sim_rets)
+sp500_sim_rets_full <- t(apply(sim_inv_sp500, 1, function(x){f_forecast_y(theta=theta, 
+                                                                         sig2_prev = sig2_prev, 
+                                                                         y_prev = y_prev, 
+                                                                         resids_next = x)$y_next}))
+colnames(sp500_sim_rets_full) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+head(sp500_sim_rets_full)
 ```
 
 
@@ -1308,18 +1264,18 @@ ex_vix_forecast
 
 ```{r}
 # apply to all rows and pack into a matrix 
-vix_sim_rets <- t(apply(sim_inv_vix, 1, function(x){f_forecast_x(phi=phi,
+vix_sim_rets_full <- t(apply(sim_inv_vix, 1, function(x){f_forecast_x(phi=phi,
                                                                  x_prev = x_prev, 
                                                                  resids_next = x)}))
-colnames(vix_sim_rets) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-head(vix_sim_rets)
+colnames(vix_sim_rets_full) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+head(vix_sim_rets_full)
 ```
 
 
 ```{r}
 # example 5-days ahead simulation vs actual values: 
 hist(vix_rets, nclass=40)
-abline(v=ex_vix_forecast, col="blue")
+abline(v=ex_vix_forecast, col="blue") # one simulation
 legend(x="topleft", 
        legend = c("Copula VIX sim. rets."),
        col = c("blue"), 
@@ -1327,67 +1283,38 @@ legend(x="topleft",
 ```
 
 
-
-
-
-
-
-
-
-
-### Other stuff
-
-
-$$
-\begin{aligned}
-\overset{\rightarrow}{\alpha}^{*} &=  \underset{\overset{\rightarrow}{\alpha}}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - \sigma(m .\tau)\right| \\ 
-&= \underset{\alpha_1, \alpha_2, \alpha_3, \alpha_4}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - 
-\left( \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}  \right)
-\right|
-\end{aligned}
-$$
-
-$$
-\sigma(m,\tau) = \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}
-$$
-
-$$
-m = \dfrac{S}{K} 
-$$
+### Transforming returns back to SP500 prices and VIX values 
 
 ```{r}
-# obtain last price 
-S <- sp500[length(sp500)][[1]]
+# Obtain Initial values (last value of simulation) 
+spT <- sp500[length(sp500)][[1]]
+vixT <- vix[length(vix)][[1]]
 
-# convert to draframe for easier manipulation 
-calls_df <- as.data.frame(calls)
-puts_df <- as.data.frame(puts)
+# calculate the price and values from the simulated log-returns 
+sim_val_mats_full <- f_logret_to_price(sp_init = spT,
+                                      vix_init = vixT, 
+                                      sim_rets_sp500 = sp500_sim_rets_full, 
+                                      sim_rets_vix = vix_sim_rets_full
+                                      )
 
-# assign extra column to puts (1) and calls (0)
-calls_df["type"] <- "call"
-puts_df["type"] <- "put"
-
-# check dimensions 
-dim(calls_df) 
-dim(puts_df)
-
-# stack both of these matrices together 
-puts_calls <- rbind(calls_df, puts_df) 
-
-# intergate the price 
-puts_calls["S"] <- S
-puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
-
-# filter the calls that have moniness over one 
-calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
-
-# filter the puts that have moniness below one
-puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
-
-# combine these results into putcalls again 
-call_put_data <- rbind(calls_m_over, puts_m_under)
-head(call_put_data)
+# unpack matrices 
+sp500_sim_price_full <- sim_val_mats_full$sp500 
+vix_sim_vol_full <- sim_val_mats_full$vix
 ```
+
+
+```{r}
+# compare simulated returns with the price
+head(sp500_sim_rets_full)
+head(sp500_sim_price_full) 
+```
+
+```{r}
+# compare simualted log rets with volatility 
+head(vix_sim_rets_full)
+head(vix_sim_vol_full)
+```
+
 
 
 
