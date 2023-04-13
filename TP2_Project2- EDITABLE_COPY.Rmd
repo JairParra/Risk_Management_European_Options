@@ -280,8 +280,9 @@ black_scholes(S_t, K, r, tau, sigma)
 Assume the following book of **European Call Options:** 
 
 1. **1x** strike $K=1600$ with maturity $T=20d$ 
-2. **1x** strike $K=1605$ with maturity $T=40d$
-3. **1x** strike $K=1800$ with maturity $T=40d$ 
+2. **1x** strike $K=1650$ with maturity $T=20d$
+3. **1x** strike $K=1750$ with maturity $T=40d$ 
+2. **1x** strike $K=1800$ with maturity $T=40d$
 
 Find the price of this book given **the last underlying price** and the **last implied volatility** (take the VIX for all options). Use **Black-Scholes** to price the options. Take the current term structure and **linearly interpolate** to find the corresponding rates. Use 360 days/year for the term structure and **250 days/year** for the maturity of the options. 
 
@@ -330,8 +331,9 @@ price_option(T=20, K=1600, calls = calls, rf_mat =  rf_mat, stock = NA, S_t = S_
 Next, using the function above we price the book of options given: 
 
 1. **1x** strike $K=1600$ with maturity $T=20d$ 
-2. **1x** strike $K=1605$ with maturity $T=40d$
-3. **1x** strike $K=1800$ with maturity $T=40d$ 
+2. **1x** strike $K=1650$ with maturity $T=20d$
+3. **1x** strike $K=1750$ with maturity $T=40d$ 
+2. **1x** strike $K=1800$ with maturity $T=40d$
 
 First, we retrieve the latest value for the underlying (SP500) and the latest implied volatility (VIX): 
 
@@ -349,11 +351,16 @@ price_option(T=20, K=1600, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 
 ```{r}
 # Second Call Option 
-price_option(T=40, K=1605, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
+price_option(T=20, K=1650, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 ```
 
 ```{r}
 # Third Call Option 
+price_option(T=40, K=1750, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
+```
+
+```{r}
+# Fourth Call Option 
 price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 ```
 \newpage
@@ -664,9 +671,8 @@ Next, we calculate the price of the book of options for the simulated values usi
 set.seed(123)
 
 # Initialize strikes and maturities the options 
-T_vec <- c(20,40,40) #  maturities 
-K_vec <- c(1600, 1605, 1800) # Strikes 
-
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
 
 # Obtain the obtion prices from simulation values 
 opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500, 
@@ -684,6 +690,7 @@ opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500,
 head(opt_price_mats$opt1)
 head(opt_price_mats$opt2)
 head(opt_price_mats$opt3)
+head(opt_price_mats$opt4)
 ```
 
 ### Distribution of the Profit and Loss for the Book Of Options 
@@ -721,8 +728,8 @@ The function used is `f_pl_simulation()`, found under `code/OptionPricing.R`.
 
 ```{r}
 # Initialize strikes and maturities the options 
-T_vec <- c(20,40,40) #  maturities 
-K_vec <- c(1600, 1605, 1800) # Strikes 
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
 
 # Compute the profits and loses for the simulation  from the simulated option premiums
 PL_mats <- f_pl_simulation(sim_price_sp500 = sim_price_sp500, 
@@ -737,6 +744,7 @@ PL_mats <- f_pl_simulation(sim_price_sp500 = sim_price_sp500,
 head(PL_mats$PL1)
 head(PL_mats$PL2)
 head(PL_mats$PL3)
+head(PL_mats$PL4)
 ```
 
 **Distribution of Options P/L** 
@@ -748,11 +756,13 @@ Next, using all the simulated profits and losses for each of the options, we dis
 sim_pl_opt1 <- as.vector(PL_mats$PL1)
 sim_pl_opt2 <- as.vector(PL_mats$PL2)
 sim_pl_opt3 <- as.vector(PL_mats$PL3)
+sim_pl_opt4 <- as.vector(PL_mats$PL4)
 
 # Compute the 95% VaR and 95% ES
 opt1_VaR_ES <- f_VaR_ES(sim_pl_opt1, alpha = 0.05)
 opt2_VaR_ES <- f_VaR_ES(sim_pl_opt2, alpha = 0.05)
 opt3_VaR_ES <- f_VaR_ES(sim_pl_opt3, alpha = 0.05)
+opt4_VaR_ES <- f_VaR_ES(sim_pl_opt4, alpha = 0.05)
 
 # plot the distribution for each of the options 
 par(mfrow = c(2,2))
@@ -778,6 +788,13 @@ lines(density(sim_pl_opt3), lwd=2, col="blue")
 abline(v=opt3_VaR_ES$VaR, col="red") # 95% VaR
 abline(v=opt3_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt3)
+
+hist(sim_pl_opt4, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[4], " T=", T_vec[4], " (Call)"))
+lines(density(sim_pl_opt4), lwd=2, col="blue")
+abline(v=opt4_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt4_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt4)
 ```
 
 These all look like multimodal distributions. The last one, particularly shows a different mode for each of the fives days computed. The 95% VaR (red) and ES (black) are all displayed in the plots. 
@@ -798,6 +815,7 @@ $$
 opt1_VaR_ES$VaR # first option 
 opt2_VaR_ES$VaR # second doption 
 opt3_VaR_ES$VaR # third option
+opt4_VaR_ES$VaR # fourth option
 ```
 ## ES95 
 
@@ -808,6 +826,7 @@ Expected shortfall is calculated by averaging all of the returns in the distribu
 opt1_VaR_ES$ES
 opt2_VaR_ES$ES
 opt3_VaR_ES$ES
+opt4_VaR_ES$ES
 ```
 
 
@@ -1352,8 +1371,8 @@ Same as before, we calculate the price of the book of options for the simulated 
 set.seed(123)
 
 # Initialize strikes and maturities the options 
-T_vec <- c(20,40,40) #  maturities 
-K_vec <- c(1600, 1605, 1800) # Strikes 
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
 
 # Obtain the obtion prices from simulation values 
 opt_price_mats_full <- f_opt_price_simulation(sim_price_sp500 = sp500_sim_price_full, 
@@ -1371,6 +1390,7 @@ opt_price_mats_full <- f_opt_price_simulation(sim_price_sp500 = sp500_sim_price_
 head(opt_price_mats_full$opt1)
 head(opt_price_mats_full$opt2)
 head(opt_price_mats_full$opt3)
+head(opt_price_mats_full$opt4)
 ```
 
 ### Distribution of the Profit and Loss for the Book Of Options 
@@ -1383,8 +1403,8 @@ The function used is `f_pl_simulation()`, found under `code/OptionPricing.R`.
 
 ```{r}
 # Initialize strikes and maturities the options 
-T_vec <- c(20,40,40) #  maturities 
-K_vec <- c(1600, 1605, 1800) # Strikes 
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
 
 # Compute the profits and loses for the simulation  from the simulated option premiums
 PL_mats_full <- f_pl_simulation(sim_price_sp500 = sp500_sim_price_full, 
@@ -1399,6 +1419,7 @@ PL_mats_full <- f_pl_simulation(sim_price_sp500 = sp500_sim_price_full,
 head(PL_mats_full$PL1)
 head(PL_mats_full$PL2)
 head(PL_mats_full$PL3)
+head(PL_mats_full$PL4)
 ```
 
 **Distribution of Options P/L** 
@@ -1410,11 +1431,13 @@ Next, using all the simulated profits and losses for each of the options, we dis
 sim_pl_opt1_full <- as.vector(PL_mats_full$PL1)
 sim_pl_opt2_full <- as.vector(PL_mats_full$PL2)
 sim_pl_opt3_full <- as.vector(PL_mats_full$PL3)
+sim_pl_opt4_full <- as.vector(PL_mats_full$PL4)
 
 # Compute the 95% VaR and 95% ES
 opt1_full_VaR_ES <- f_VaR_ES(sim_pl_opt1_full, alpha = 0.05)
 opt2_full_VaR_ES <- f_VaR_ES(sim_pl_opt2_full, alpha = 0.05)
 opt3_full_VaR_ES <- f_VaR_ES(sim_pl_opt3_full, alpha = 0.05)
+opt4_full_VaR_ES <- f_VaR_ES(sim_pl_opt4_full, alpha = 0.05)
 
 # plot the distribution for each of the options 
 par(mfrow = c(2,2))
@@ -1442,6 +1465,14 @@ lines(density(sim_pl_opt3_full), lwd=2, col="blue")
 abline(v=opt3_full_VaR_ES$VaR, col="red") # 95% VaR
 abline(v=opt3_full_VaR_ES$ES, col="black") # expected shortfall 
 rug(sim_pl_opt3_full)
+
+# distribution of fourth option 
+hist(sim_pl_opt4_full, nclass = round(10 * log(n_sim)),
+     probability = TRUE, xlab=paste0("K=", K_vec[4], " T=", T_vec[4], " (Call)"))
+lines(density(sim_pl_opt4_full), lwd=2, col="blue")
+abline(v=opt4_full_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt4_full_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt4_full)
 ```
 
 

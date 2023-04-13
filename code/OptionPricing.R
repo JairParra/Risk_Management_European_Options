@@ -300,8 +300,6 @@ f_opt_price_simulation <- function(sim_price_sp500, sim_vol_vix, K_vec, T_vec, p
       K <- K_vec[j]
       opt_name <- lnames[j]
       
-      
-      
       # price first Call option
       c_vec <- prc_opt(T-t, K, calls, rf_mat, prices_t, vols_t) # vec of premiums
       opt_price_mats[[opt_name]][ ,t] <- c_vec # assign to matrix 
