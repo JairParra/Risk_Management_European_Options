@@ -26,6 +26,10 @@ colnames(calls) <- c("K","tau", "IV", "tau_days")
 puts <- cbind(puts, puts[, "tau"]*250)
 colnames(puts) <- c("K","tau", "IV", "tau_days")
 
+#Book of options
+T = c(20, 20, 40, 40)
+K = c(1600, 1650, 1750, 1800)
+
 #import function
 source(here("code", "OptionPricing.R"))
 ```
@@ -126,18 +130,12 @@ prices <- list(SP500 = f_convert_log(initial = init[1], daily_rets$SP500),
 P&L of book of options
 
 ```{r, warning = FALSE}
-#  maturities for each of the options
-T1 <- 20
-T2 <- 40
-T3 <- 40
-
-# Strikes for the options 
-K1 <- 1600 
-K2 <- 1605 
-K3 <- 1800
+#Book of options
+#T = c(20, 20, 40, 40)
+#K = c(1600, 1650, 1750, 1800)
 
 #memory allocation
-option_price <- lapply(rep(1, 3), # generate three empty matrices of compatible sizes
+option_prices <- lapply(rep(1, length(K)), # generate three empty matrices of compatible sizes
                   function(x){
                     matrix(NA, 
                            nrow(prices$SP500), 
@@ -145,12 +143,11 @@ option_price <- lapply(rep(1, 3), # generate three empty matrices of compatible 
                            dimnames=list(seq(1:nrow(prices$SP500)),
                                          c("T+1", "T+2", "T+3", "T+4", "T+5")
                                          )
-                           )
+                         )
                     }
                   )
-names(option_price) <- c("PL1", "PL2", "PL3")
-
-#loop through and find the PL
+names(option_prices) <- c("K1", "K2", "K3", "K4")
+#loop through and calculated the PL
 for(i in 1:n_day){
   #Underlying price at day i
   price_t <- prices$SP500[,i]
@@ -158,26 +155,20 @@ for(i in 1:n_day){
   #Underlying volatility at day i
   vol_t <- prices$VIX[,i]
   
-  #Call option pricing K = 1605
-  c1_vec <- prc_opt(T1-i, K1, calls, rf_mat, price_t, vol_t)
-  option_price$PL1[,i] <- c1_vec
-  
-  #Call option pricing K = 1605 
-  c2_vec <- prc_opt(T2-i, K2, calls, rf_mat, price_t, vol_t)
-  option_price$PL2[,i] <- c1_vec
- 
-   #Call option pricing K = 1800
-  c3_vec <- prc_opt(T3-i, K3, calls, rf_mat, price_t, vol_t)
-  option_price$PL3[,i] <- c1_vec    
+  #calculating the price of the option
+  for(j in 1:4){
+    option_prices[[j]][,i] <- prc_opt(T[j]-i, K[j], calls, rf_mat, price_t, vol_t)
+  }
 }
 
-option_price$PL1
+head(option_prices$K1)
+
 ```
 
 ```{r}
 
 #Profit of an option -> PL = max(S-K,0)-price
-PL_matrices <- lapply(rep(1, 3), # generate three empty matrices of compatible sizes
+PL_matrices <- lapply(rep(1, 4), # generate three empty matrices of compatible sizes
                   function(x){
                     matrix(NA, 
                            nrow(prices$SP500), 
@@ -188,26 +179,19 @@ PL_matrices <- lapply(rep(1, 3), # generate three empty matrices of compatible s
                            )
                     }
                   )
-names(PL_matrices) <- c("PL1", "PL2", "PL3")
+names(PL_matrices) <- c("PL1", "PL2", "PL3", "PL4")
 
 for(i in 1:n_day){
   #spot price of underlying at day i
   spot <- prices$SP500[,i]
   
-  #premium at day i for K1
-  premium_K1 <- option_price$PL1[, i]
-  PL_matrices$PL1[,i] <- max((spot - K1), 0) - premium_K1
-  
-  #premium at day i for K2
-  premium_K2 <- option_price$PL2[, i]
-  PL_matrices$PL2[,i] <- max((spot - K2), 0) - premium_K1
-  
-  #premium at day i for K3
-  premium_K3 <- option_price$PL3[, i]
-  PL_matrices$PL3[,i] <- max((spot - K3), 0) - premium_K1
-  
+  for(j in 1:length(K)){
+    premium <- option_prices[[j]][,i]
+    PL_matrices[[j]][,i] <- max((spot - K[j]), 0) - premium
+  }
 }
 
+head(PL_matrices$PL4)
 ```
 
 Graph the PL to find the distribution
@@ -221,8 +205,15 @@ hist(PL_matrices$PL1, nclass = round(10*log(length(PL_matrices$PL1))),
 ```
 
 ```{r}
-hist(PL_matrices$PL2, nclass = round(10*log(length(PL_matrices$PL1))))
-hist(PL_matrices$PL3, nclass = round(10*log(length(PL_matrices$PL1))))
+hist(PL_matrices$PL2, nclass = round(10*log(length(PL_matrices$PL1))),
+     main = "Distribution of P&L of Call Option 2",
+     xlab = "P&L of Calls")
+hist(PL_matrices$PL3, nclass = round(10*log(length(PL_matrices$PL1))),
+     main = "Distribution of P&L of Call Option 3",
+     xlab = "P&L of Calls")
+hist(PL_matrices$PL4, nclass = round(10*log(length(PL_matrices$PL1))),
+     main = "Distribution of P&L of Call Option 4",
+     xlab = "P&L of Calls")
 ```
 
 
