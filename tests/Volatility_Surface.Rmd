@@ -69,9 +69,9 @@ f_sig <- function(alpha, m, t){
 f_fit <- function(alpha, m, t, IV){
   
   sig <- f_sig(alpha, m, t)
-  distance <- abs(IV - sig)
+  error <- abs(IV - sig)
   
-  return(sum(distance))
+  return(sum(error))
 }
 ```
 
@@ -93,10 +93,13 @@ fit <- optim(par = start,
              t = call_put_data$tau,
              IV = call_put_data$IV)
 
-
+#optimal parameters
 alpha <- fit$par
-distance <- fit$value
 
+#delta of the VIX
+VIX_model <- fit$par[1] + fit$par[4]
+distance <- VIX - VIX_model
+distance
 ```
 
 
@@ -118,6 +121,22 @@ Re-price the portfolio in one week assuming the same parametric model but shifte
 There is a distance between the model and the data, we need to keep the same distance and project it forward
 
 ```{r}
+#Simulate the foward path for the VIX at the 5 day horizon assuming both normal distributions
+load(here("data_out","simulated_VIX.rda"))
+#sim_data
+
+#Lets say we take the mean of all the bootstrapped data to predict the VIX a week ahead
+VIX_sim <- colMeans(sim_data)[5]
+
+#re-calibrate the VIX_model
+VIX_model
+VIX_model2 <- VIX_sim - distance
+
+sim_fit <- solnp(alpha, fun = f_fit, eqfun = f_constraint, eqB = 0,
+                 m = call_put_data$m,
+                 t = call_put_data$tau,
+                 IV = call_put_data$IV)
+
 
 ```
 
