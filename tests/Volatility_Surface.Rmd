@@ -11,38 +11,47 @@ Load data
 ```{r}
 load(here("data_raw", "Market.rda"))
 
-S <- as.numeric(Market$sp500) #3410
+S <- Market$sp500[length(Market$sp500)][[1]] #3410
+VIX <- as.numeric(Market$vix[length(Market$vix)])
 
-K <- Market$calls[,"K"]
+calls <- Market$calls
 
-IV <- as.numeric(Market$vix)
+puts <- Market$puts
 
-tau <- Market$calls[,"tau"] #422
+# convert to draframe for easier manipulation 
+calls_df <- as.data.frame(calls)
+puts_df <- as.data.frame(puts)
 
-length(S)
+# assign extra column to puts (1) and calls (0)
+calls_df["type"] <- "call"
+puts_df["type"] <- "put"
 
+# check dimensions 
+dim(calls_df) 
+dim(puts_df)
+
+# stack both of these matrices together 
+puts_calls <- rbind(calls_df, puts_df) 
+
+# integrate the price 
+puts_calls["S"] <- rep(S, nrow(puts_calls))
+puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
+
+# filter the calls that have moniness over one 
+calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
+
+# filter the puts that have moniness below one
+puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
+
+# combine these results into putcalls again 
+call_put_data <- rbind(calls_m_over, puts_m_under)
+
+head(call_put_data)
 ```
 
 Parametric Surface
 ```{r}
-f_variable <- function(K, S, tau, IV){
-  #Each column for a different strike price
-  money_m <- matrix(NA, nrow = length(S), ncol = length(K))
-  tau_m <- matrix(rep(tau,each= length(S)),nrow=length(S))
-  IV_m <- matrix(rep(IV, each = ncol(money_m)), ncol = ncol(money_m))
-  
-  for(i in 1:ncol(money_m)){
-    money_m[, i] <- K[i]/S
-  }
-  
-  variable <- list(m = money_m,
-                   t = tau_m,
-                   IV = IV_m)
-  
-  return(variable)
-}
-
-f_parameter <- function(alpha, m, t, IV){
+f_sig <- function(alpha, m, t){
   #m is an array of K/S
   #t is a repetitive array same tau for K
   #IV is a vector or numbers
@@ -54,14 +63,15 @@ f_parameter <- function(alpha, m, t, IV){
   
   sig <- a1 + a2*(m-1)^2 + a3*(m-1)^3 + a4*sqrt(t)
   
-  print(sig)
+  return(sig)
+}
+
+f_fit <- function(alpha, m, t, IV){
   
-  #print(dim(IV))
+  sig <- f_sig(alpha, m, t)
+  distance <- abs(IV - sig)
   
-  result <- abs(IV - sig)
-  
-  output <- sum(result)
-  return(output)
+  return(sum(distance))
 }
 ```
 
@@ -70,34 +80,46 @@ Optimize the function
 ```{r}
 #Initialization
 start <- c(1, 1, 0, 1)
-m_variable <- f_variable(K, S, tau, IV)
 
-
-test <- f_parameter(start, m_variable$m[1:100,1:100], m_variable$t[1:100, 1:100], m_variable$IV[1:100,1:100])
-test
-
-length(IV)
-dim(test)
-dim(m_variable$m)
-dim(m_variable$t)
-dim(m_variable$IV)
+test <- f_fit(start, m = call_put_data$m[1:100],
+                    t = call_put_data$tau[1:100],
+                    IV = call_put_data$IV[1:100])
 
 #Optimize
 fit <- optim(par = start,
-             fn = f_parameter,
-             method = "Nelder-Mead",
-             m = m_variable$m,
-             t = m_variable$t,
-             IV = IV)
+             fn = f_fit,
+             method = "BFGS",
+             m = call_put_data$m,
+             t = call_put_data$tau,
+             IV = call_put_data$IV)
 
 
-fit$par
-
-
-
+alpha <- fit$par
+distance <- fit$value
 
 ```
 
+
+Volatility Curve Plot
+
+```{r}
+Moneyness <- call_put_data$m
+Time <- call_put_data$tau
+IV <- as.matrix(f_sig(alpha, Moneyness, Time))
+
+##THE PLOT I HAVE NO IDEA HOW TO DO IT
+plot_ly(x=~Moneyness, y=~Time, z=~IV) %>% add_surface() %>%
+    layout(title = "Option Vol Surface")
+
+
+```
+Re-price the portfolio in one week assuming the same parametric model but shifted by the VIX difference
+
+There is a distance between the model and the data, we need to keep the same distance and project it forward
+
+```{r}
+
+```
 
 
 
