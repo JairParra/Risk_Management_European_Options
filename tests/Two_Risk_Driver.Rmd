@@ -200,24 +200,39 @@ head(PL_matrices$PL4)
 
 Graph the PL to find the distribution
 
-```{r}
-#P&L for Call option 1 is
-hist(PL_matrices$PL1, nclass = round(10*log(length(PL_matrices$PL1))),
-     main = "Distribution of P&L of Call Option 1",
-     xlab = "P&L of Calls")
+```{r fig.height=9, fig.width=11, fig.align='center'}
+#window modification
+par(mfrow = c(2,2))
+
+#Distribution P&L for Call option 1
+hist(PL_matrices$PL1, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices$PL1), lwd=2, col="blue")
+rug(PL_matrices$PL1)
+
+#Distribution P&L for Call option 2
+hist(PL_matrices$PL2, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices$PL2), lwd=2, col="blue")
+rug(PL_matrices$PL2)
+
+#Distribution P&L for Call option 3
+hist(PL_matrices$PL3, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices$PL3), lwd=2, col="blue")
+rug(PL_matrices$PL3)
+
+#Distribution P&L for Call option 4
+hist(PL_matrices$PL4, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices$PL4), lwd=2, col="blue")
+rug(PL_matrices$PL4)
+
 
 ```
 
 ```{r}
-hist(PL_matrices$PL2, nclass = round(10*log(length(PL_matrices$PL1))),
-     main = "Distribution of P&L of Call Option 2",
-     xlab = "P&L of Calls")
-hist(PL_matrices$PL3, nclass = round(10*log(length(PL_matrices$PL1))),
-     main = "Distribution of P&L of Call Option 3",
-     xlab = "P&L of Calls")
-hist(PL_matrices$PL4, nclass = round(10*log(length(PL_matrices$PL1))),
-     main = "Distribution of P&L of Call Option 4",
-     xlab = "P&L of Calls")
+
 ```
 
 
