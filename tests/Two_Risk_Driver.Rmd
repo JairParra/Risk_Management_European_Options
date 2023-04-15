@@ -125,6 +125,10 @@ Assign the underlying price and the VIX
 ```{r}
 prices <- list(SP500 = f_convert_log(initial = init[1], daily_rets$SP500),
                VIX = f_convert_log(initial = init[2], daily_rets$VIX))
+
+sim_data <- prices$VIX
+#Save simulated results 
+save(sim_data, file =  "simulated_VIX.rda")
 ```
 
 P&L of book of options

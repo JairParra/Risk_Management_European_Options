@@ -3,6 +3,7 @@
 Upload libraries
 ```{r}
 library("here")
+library(plotly)
 
 source(here("code", "OptionPricing.R"))
 ```
@@ -106,14 +107,22 @@ distance
 Volatility Curve Plot
 
 ```{r}
-Moneyness <- call_put_data$m
-Time <- call_put_data$tau
-IV <- as.matrix(f_sig(alpha, Moneyness, Time))
+#We need to filter out duplicate moneyness and maturity pairs
+Moneyness <- call_put_data$m[1:10]
+Tau <- call_put_data$tau[1:10]
 
-##THE PLOT I HAVE NO IDEA HOW TO DO IT
-plot_ly(x=~Moneyness, y=~Time, z=~IV) %>% add_surface() %>%
-    layout(title = "Option Vol Surface")
+table
 
+IV <- matrix(NA, nrow = length(Moneyness), ncol = length(Tau))
+
+#Creating a surface 
+for(i in 1:length(Moneyness)){
+  for(j in 1:length(Tau)){
+    IV[i,j] <- f_sig(alpha, Moneyness[i], Tau[j])
+  }
+}
+#Try plotting now
+plot_ly(x =~ Moneyness, y =~ Maturity, z =~ IV) %>% add_surface()
 
 ```
 Re-price the portfolio in one week assuming the same parametric model but shifted by the VIX difference
@@ -132,10 +141,11 @@ VIX_sim <- colMeans(sim_data)[5]
 VIX_model
 VIX_model2 <- VIX_sim - distance
 
-sim_fit <- solnp(alpha, fun = f_fit, eqfun = f_constraint, eqB = 0,
-                 m = call_put_data$m,
-                 t = call_put_data$tau,
-                 IV = call_put_data$IV)
+delta_ratio <- VIX_model2/VIX_model
+
+alpha.adjusted <- alpha*c(delta_ratio, 1, 1, delta_ratio)
+
+
 
 
 ```
