@@ -52,7 +52,7 @@ library(xts)
 library(zoo)
 library(quantmod)
 library(plotly)
-
+library(mvtnorm)
 # additional source code
 # source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
 # source(here("code", "StudentCopulaPdf.R")) # compute the pdf of a normal copula
