@@ -424,6 +424,14 @@ head(vix_rets)
 \newpage
 # Two risk drivers and Gaussian Model 
 
+1. Compute the daily log-returns of the underlying stock.
+2. Compute the daily log-returns of the VIX.
+3. Assume they are invariants normally distributed.
+4. Generate 10 000 scenarios for the one-week ahead underlying price and the one week ahead VIX value
+   using the normal distribution fitted to the past risk drivers.
+5. Determine the P&L distribution of the book of options, using the simulated values. Take interpolated
+   rates for the term structure.
+
 ```{r}
 #####################################################
 ###  ---> INSERT YOUR PART FROM HERE (ALESSIO) <---- ###
@@ -1023,10 +1031,167 @@ opt4_VaR_ES$ES
 \newpage
 # Volatility Surface 
 
+1.Fit a volatility surface to the implied volatilities observed on the market (traded call and put options).
+  Minimize the absolute distance between the market implied volatilities and the model implied volatilities.
+  The parametric surface is given by:
+               σ(m, τ ) = α1 + α2(m − 1)2 + α3(m − 1)3 + α4√τ 
+
+2. Re-price the portfolio in one week assuming the same parametric model but shifted by the one-year
+  ATM implied volatility difference.
+
+Note: Need to install the library *plotly* to graph the volatility surface
+
 ```{r}
 #########################################################
 ###  ---> INSERT YOUR PART FROM HERE (ALESSIO) <---- ###
 ############################################## #########
+#initialize the last price of the underlying
+S <- Market$sp500[length(Market$sp500)][[1]] #3410
+VIX <- as.numeric(Market$vix[length(Market$vix)])
+
+# convert to draframe for easier manipulation 
+calls_df <- as.data.frame(calls)
+puts_df <- as.data.frame(puts)
+
+# assign extra column to puts (1) and calls (0)
+calls_df["type"] <- "call"
+puts_df["type"] <- "put"
+
+# check dimensions 
+dim(calls_df) 
+dim(puts_df)
+
+# stack both of these matrices together 
+puts_calls <- rbind(calls_df, puts_df) 
+
+# integrate the price 
+puts_calls["S"] <- rep(S, nrow(puts_calls))
+puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
+
+# filter the calls that have moniness over one 
+calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
+
+# filter the puts that have moniness below one
+puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
+
+# combine these results into putcalls again 
+call_put_data <- rbind(calls_m_over, puts_m_under)
+
+```
+**Functions for the parametric surface fit**
+```{r}
+f_sig <- function(alpha, m, t){
+  #m is an array of K/S
+  #t is a repetitive array same tau for K
+  #IV is a vector or numbers
+  #alpha is a set of paramters
+  a1 <- alpha[1]
+  a2 <- alpha[2]
+  a3 <- alpha[3]
+  a4 <- alpha[4]
+  
+  sig <- a1 + a2*(m-1)^2 + a3*(m-1)^3 + a4*sqrt(t)
+  
+  return(sig)
+}
+
+f_fit <- function(alpha, m, t, IV){
+  
+  sig <- f_sig(alpha, m, t)
+  error <- abs(IV - sig)
+  
+  return(sum(error))
+}
+```
+
+Optimize the function
+
+```{r}
+#Initialization
+start <- c(1, 1, 0, 1)
+
+test <- f_fit(start, m = call_put_data$m[1:100],
+                    t = call_put_data$tau[1:100],
+                    IV = call_put_data$IV[1:100])
+
+#Optimize
+fit <- optim(par = start,
+             fn = f_fit,
+             method = "BFGS",
+             m = call_put_data$m,
+             t = call_put_data$tau,
+             IV = call_put_data$IV)
+
+#optimal parameters
+alpha <- fit$par
+
+```
+
+Volatility Surface Plot
+
+```{r}
+#Summary of data
+Moneyness <- call_put_data$m
+Tau <- call_put_data$tau
+
+summary(Moneyness)
+summary(Tau)
+
+#Initialize x and y axis
+maturity <- seq(from =0, to = 2.5, by = 0.005)
+moneyness <-  seq(from =0, to = 2, by = 0.005)
+
+#memory allocation
+IV <- matrix(NA, nrow = length(moneyness), ncol = length(maturity))
+
+#Creating a surface 
+for(i in 1:length(moneyness)){
+  for(j in 1:length(maturity)){
+    IV[i,j] <- f_sig(alpha, moneyness[i], maturity[j])
+  }
+}
+#Try plotting now
+plot_ly(x =~ moneyness, y =~ maturity, z =~ IV) %>% add_surface() 
+
+```
+2. Re-price the portfolio in one week assuming the same parametric model but shifted by the VIX difference
+
+There is a distance between the model and the data, we need to keep the same distance and project it forward
+
+```{r}
+#Simulate the foward path for the VIX at the 5 day horizon assuming both normal distributions
+load(here("data_out","sim_vol_vix_student_copula.rda"))
+
+#Assuming we take the mean of the 5th simulated day
+VIX_sim <- colMeans(sim_vol_vix)[5]
+
+#Finding the initial difference between model and ATM
+#delta of the VIX
+VIX_model <- fit$par[1] + fit$par[4]
+distance <- VIX - VIX_model
+distance
+
+#re-calibrate the VIX_model
+VIX_model
+VIX_model2 <- VIX_sim - distance
+
+delta_ratio <- VIX_model2/VIX_model
+
+alpha.adjusted <- alpha*c(delta_ratio, 1, 1, delta_ratio)
+
+#memory allocation
+IV.adjusted <- matrix(NA, nrow = length(moneyness), ncol = length(maturity))
+
+#Creating a surface 
+for(i in 1:length(moneyness)){
+  for(j in 1:length(maturity)){
+    IV[i,j] <- f_sig(alpha.adjusted, moneyness[i], maturity[j])
+  }
+}
+#Try plotting now
+plot_ly(x =~ moneyness, y =~ maturity, z =~ IV) %>% add_surface() 
+
+
 ```
 
 

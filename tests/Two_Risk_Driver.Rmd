@@ -172,7 +172,7 @@ head(option_prices$K1)
 ```{r}
 
 #Profit of an option -> PL = max(S-K,0)-price
-PL_matrices <- lapply(rep(1, 4), # generate three empty matrices of compatible sizes
+PL_matrices <- lapply(rep(1, 4), #memory allocation
                   function(x){
                     matrix(NA, 
                            nrow(prices$SP500), 
