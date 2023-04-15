@@ -44,11 +44,14 @@ options("scipen" = 10)
 ### Libraries 
 
 ```{r, message=FALSE, echo=FALSE}
+#Note needed to install plotly library for the surface
+#install.packages(plotly)
 # Preload R libraries we will use 
 library(here)
 library(xts) 
 library(zoo)
 library(quantmod)
+library(plotly)
 
 # additional source code
 # source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
@@ -206,6 +209,16 @@ colnames(puts) <- c("K","tau", "IV", "tau_days")
 head(puts)
 tail(puts)
 ```
+
+**Definining the book of options**
+
+```{r}
+# Initialize strikes and maturities the options 
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
+```
+
+
 \newpage
 # Pricing a Portfolio of Options 
 
@@ -366,12 +379,47 @@ price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 \newpage
 # One risk driver and Gaussian Model 
 
+### Log-returns 
+
+The **discrete returns** are given by: 
+
+$$
+R_{t+1} = \dfrac{P_{t+1} - P_{t}}{P_{t}}
+$$
+
+and the next ahead log-returns are given by: 
+
+$$
+\log(R_{t+1}) = \log(P_{t+1} - P_{t}) - \log(P_{t})
+$$
+
+```{r, message=FALSE}
+# load reqruired libraries 
+library("PerformanceAnalytics")
+
+# calculate returns
+sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
+vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
+
+# remove first return 
+sp500_rets <- sp500_rets[-1] 
+vix_rets <- vix_rets[-1]
+
+# remove nas 
+sp500_rets[is.na(sp500_rets)] <- 0
+vix_rets[is.na(vix_rets)] <- 0
+
+# display
+head(sp500_rets) 
+head(vix_rets)
+```
+
+
 ```{r}
 #####################################################
 ###  ---> INSERT YOUR PART FROM HERE (IOAN) <---- ###
 ############################################## ######
 ```
-
 
 \newpage
 # Two risk drivers and Gaussian Model 
@@ -380,6 +428,188 @@ price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 #####################################################
 ###  ---> INSERT YOUR PART FROM HERE (ALESSIO) <---- ###
 ############################################## ######
+rets <- cbind(sp500_rets, vix_rets)
+
+#Number of days ahead
+n_day <- 5
+
+#Assume that the distribution is normally fitted
+mu <- apply(rets, 2, mean)
+
+Sigma <- cov(rets)
+
+n_sim <- 10000
+
+#memory allocation
+updated_rets <- matrix(NA, n_sim, 2)
+rets_day <- matrix(NA, n_sim)
+
+#iterations
+set.seed(1234)
+for(i in 1:n_day){
+    updated_rets <- rmvnorm(mean = mu, sigma = Sigma, n = n_sim)
+    
+    if(i == 1){
+      rets_day <- updated_rets
+    }
+    else{
+      rets_day <- cbind(rets_day,updated_rets)
+    }
+    
+}
+head(rets_day)
+
+colnames(rets_day) <- c("Day 1", "Day 1",
+                        "Day 2", "Day 2",
+                        "Day 3", "Day 3",
+                        "Day 4", "Day 4",
+                        "Day 5", "Day 5")
+
+
+daily_rets <- list(SP500 = rets_day[,c(1, 3, 5, 7, 9)],
+                   VIX = rets_day[, c(2, 4, 6, 8, 10)])
+
+head(daily_rets$SP500)
+
+```
+
+Converting the daily log returns to the value of the underlying
+```{r}
+#Defining an initial value
+
+init <- c(Market$sp500[length(Market$sp500)],
+              Market$vix[length(Market$vix)])
+
+#prices <- f_logret_to_price(sp_init = init[1],vix_init = init[2], sim_rets_sp500 = daily_rets$SP500, sim_rets_vix = daily_rets$VIX)
+###################################
+#####ONLY USE THIS TEMPORARILY#####
+
+f_convert_log <- function(initial, l_rets){
+  #memory allocation
+  out <- matrix(NA, nrow(l_rets), ncol(l_rets))
+  
+  #change the returns to price multiples
+  changes <- exp(l_rets/100)
+
+  #initialize first day
+  out[, 1] <- as.vector(initial)*changes[,1]
+  
+  #loop through the matrix 
+  for(i in 2:ncol(l_rets)){
+     out[,i] <- out[,(i-1)]*changes[,i]
+  }
+  
+  return(out)
+}
+
+prices <- list(SP500 = f_convert_log(initial = init[1], daily_rets$SP500),
+               VIX = f_convert_log(initial = init[2], daily_rets$VIX))
+```
+
+
+Pricing the book of options 
+```{r}
+#Book of options
+#T_vec = c(20, 20, 40, 40)
+#K_vec = c(1600, 1650, 1750, 1800)
+
+#memory allocation
+option_prices <- lapply(rep(1, length(K_vec)), # generate three empty matrices of compatible sizes
+                  function(x){
+                    matrix(NA, 
+                           nrow(prices$SP500), 
+                           ncol(prices$SP500),
+                           dimnames=list(seq(1:nrow(prices$SP500)),
+                                         c("T+1", "T+2", "T+3", "T+4", "T+5")
+                                         )
+                         )
+                    }
+                  )
+names(option_prices) <- c("K1", "K2", "K3", "K4")
+#loop through and calculated the PL
+for(i in 1:n_day){
+  #Underlying price at day i
+  price_t <- prices$SP500[,i]
+  
+  #Underlying volatility at day i
+  vol_t <- prices$VIX[,i]
+  
+  #calculating the price of the option
+  for(j in 1:4){
+    option_prices[[j]][,i] <- prc_opt(T_vec[j]-i, K_vec[j], calls, rf_mat, price_t, vol_t)
+  }
+}
+
+head(option_prices$K1)
+
+##################################
+#### OPTION PRICES INCORRECT #####
+##################################
+
+#Need to fix the function f_logret_to_prices
+
+```
+Calculating the profitability of each option
+
+```{r}
+
+#Profit of an option -> PL = max(S-K,0)-price
+PL_matrices_Two_Risk <- lapply(rep(1, 4), #memory allocation
+                  function(x){
+                    matrix(NA, 
+                           nrow(prices$SP500), 
+                           ncol(prices$SP500),
+                           dimnames=list(seq(1:nrow(prices$SP500)),
+                                         c("T+1", "T+2", "T+3", "T+4", "T+5")
+                                         )
+                           )
+                    }
+                  )
+names(PL_matrices_Two_Risk) <- c("PL1", "PL2", "PL3", "PL4")
+
+for(i in 1:n_day){
+  #spot price of underlying at day i
+  spot <- prices$SP500[,i]
+  
+  for(j in 1:length(K_vec)){
+    premium <- option_prices[[j]][,i]
+    PL_matrices_Two_Risk[[j]][,i] <- max((spot - K_vec[j]), 0) - premium
+  }
+}
+
+head(PL_matrices_Two_Risk$PL1)
+```
+Graph the PL to find the distribution
+
+```{r fig.height=9, fig.width=11, fig.align='center'}
+#window modification
+par(mfrow = c(2,2))
+
+#Distribution P&L for Call option 1
+hist(PL_matrices_Two_Risk$PL1, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices_Two_Risk$PL1), lwd=2, col="blue")
+rug(PL_matrices_Two_Risk$PL1)
+
+#Distribution P&L for Call option 2
+hist(PL_matrices_Two_Risk$PL2, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices_Two_Risk$PL2), lwd=2, col="blue")
+rug(PL_matrices_Two_Risk$PL2)
+
+#Distribution P&L for Call option 3
+hist(PL_matrices_Two_Risk$PL3, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices_Two_Risk$PL3), lwd=2, col="blue")
+rug(PL_matrices_Two_Risk$PL3)
+
+#Distribution P&L for Call option 4
+hist(PL_matrices_Two_Risk$PL4, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K[1], " T=", T[1], " (Call)"))
+lines(density(PL_matrices_Two_Risk$PL4), lwd=2, col="blue")
+rug(PL_matrices_Two_Risk$PL4)
+
+
 ```
 
 
@@ -419,42 +649,6 @@ $$
 C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(F_{\nu_1}^{-1}(u), F_{\nu_1}^{-1}(v)), 
 $$
 where $F_{\nu_1}$ and $F_{\nu_2}$ are their respective CDFs. 
-
-
-### Log-returns 
-
-The **discrete returns** are given by: 
-
-$$
-R_{t+1} = \dfrac{P_{t+1} - P_{t}}{P_{t}}
-$$
-
-and the next ahead log-returns are given by: 
-
-$$
-\log(R_{t+1}) = \log(P_{t+1} - P_{t}) - \log(P_{t})
-$$
-
-```{r, message=FALSE}
-# load reqruired libraries 
-library("PerformanceAnalytics")
-
-# calculate returns
-sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
-vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
-
-# remove first return 
-sp500_rets <- sp500_rets[-1] 
-vix_rets <- vix_rets[-1]
-
-# remove nas 
-sp500_rets[is.na(sp500_rets)] <- 0
-vix_rets[is.na(vix_rets)] <- 0
-
-# display
-head(sp500_rets) 
-head(vix_rets)
-```
 
 ### Generating the simulation scenarios 
 
@@ -669,10 +863,6 @@ Next, we calculate the price of the book of options for the simulated values usi
 ```{r}
 # random seed for replication 
 set.seed(123)
-
-# Initialize strikes and maturities the options 
-T_vec <- c(20, 20, 40,40) #  maturities 
-K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
 
 # Obtain the obtion prices from simulation values 
 opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500, 

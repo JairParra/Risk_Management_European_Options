@@ -99,8 +99,8 @@ f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix){
   )
   
   # Initialize the first prices 
-  sim_val_mats$sp500[, 1] <- f_next_Pt(spT, sim_rets_sp500[, 1])
-  sim_val_mats$vix[, 1] <- f_next_Pt(vixT, sim_rets_vix[, 1])
+  sim_val_mats$sp500[, 1] <- f_next_Pt(sp_init, sim_rets_sp500[, 1])
+  sim_val_mats$vix[, 1] <- f_next_Pt(vix_init, sim_rets_vix[, 1])
   
   # for each day ahead
   for(t in 2:n_ahead){
