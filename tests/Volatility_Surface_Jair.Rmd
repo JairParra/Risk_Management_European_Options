@@ -1,0 +1,130 @@
+---
+header-includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyfoot[CO,CE]{Hair Parra, Alessio Bessan, Ioan Catalin}
+  - \fancyfoot[LE,RO]{\thepage}
+title: "Volatility Surface Tests Jair"
+author: 'TP2: Hair Parra , Alessio Bressan, Ioan Catalin'
+date: "`r Sys.Date()`"
+geometry: margin=1.3cm
+output: 
+    pdf_document: 
+      extra_dependencies: ["array", "amsmath","booktabs"]
+---
+
+<!--These are definitions of Latex Environments--> 
+\newtheorem{assumption}{Assumption}[assumption]
+\newtheorem{theorem}{Theorem}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{example}{Example}
+\newtheorem{remark*}{Remark}
+\newtheorem{exercise*}{Exercise}
+
+
+```{r setup, include=FALSE}
+# additional setup options
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=9, fig.height=6) 
+
+# configurations for plot 
+my_plot_hook <- function(x, options)
+  paste("\n", knitr::hook_plot_tex(x, options), "\n")
+knitr::knit_hooks$set(plot = my_plot_hook)
+
+# numeric format 
+options("scipen" = 10)
+```
+
+### Libraries 
+
+```{r, message=FALSE, echo=FALSE}
+# Preload R libraries we will use 
+library("here")
+library("plotly")
+
+# additional source code for this assg
+source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
+
+# load preprocessed data 
+load(here("data_clean", "Market_clean.rda"))
+```
+
+
+## Theory 
+
+  
+$$
+  \sigma(m,\tau) = \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}
+$$
+  
+$$
+  m = \dfrac{S}{K} 
+$$
+
+$$
+  \begin{aligned}
+\overset{\rightarrow}{\alpha}^{*} &=  \underset{\overset{\rightarrow}{\alpha}}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - \sigma(m .\tau)\right| \\ 
+&= \underset{\alpha_1, \alpha_2, \alpha_3, \alpha_4}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - 
+  \left( \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}  \right)
+\right|
+  \end{aligned}
+$$
+
+
+```{r}
+# rename 
+Market <- Market_clean
+
+# unpack 
+S <- Market$sp500[length(Market$sp500)][[1]] #3410
+VIX <- as.numeric(Market$vix[length(Market$vix)])
+
+calls <- Market$calls
+puts <- Market$puts
+
+# convert to dataframe for easier manipulation 
+calls_df <- as.data.frame(calls)
+puts_df <- as.data.frame(puts)
+
+# assign extra column to puts (1) and calls (0)
+calls_df["type"] <- "call"
+puts_df["type"] <- "put"
+
+# check dimensions 
+dim(calls_df) 
+dim(puts_df)
+
+# stack both of these matrices together 
+puts_calls <- rbind(calls_df, puts_df) 
+
+# integrate the price 
+puts_calls["S"] <- rep(S, nrow(puts_calls))
+puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
+
+# filter the calls that have moniness over one 
+calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
+
+# filter the puts that have moniness below one
+puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
+
+# combine these results into putcalls again 
+call_put_data <- rbind(calls_m_over, puts_m_under)
+```
+
+```{r}
+# display data
+head(call_put_data)
+```
+
+
+
+
+
+
+
