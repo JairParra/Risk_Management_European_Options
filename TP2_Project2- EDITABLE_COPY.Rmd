@@ -485,33 +485,17 @@ Converting the daily log returns to the value of the underlying
 ```{r}
 #Defining an initial value
 
-init <- c(Market$sp500[length(Market$sp500)],
-              Market$vix[length(Market$vix)])
+init <- as.numeric(c(Market$sp500[length(Market$sp500)],
+              Market$vix[length(Market$vix)]))
 
-#prices <- f_logret_to_price(sp_init = init[1],vix_init = init[2], sim_rets_sp500 = daily_rets$SP500, sim_rets_vix = daily_rets$VIX)
+prices <- f_logret_to_price(sp_init = init[1],vix_init = init[2], sim_rets_sp500 = daily_rets$SP500,
+                            sim_rets_vix = daily_rets$VIX, n_day)
+
 ###################################
 #####ONLY USE THIS TEMPORARILY#####
+###################################
 
-f_convert_log <- function(initial, l_rets){
-  #memory allocation
-  out <- matrix(NA, nrow(l_rets), ncol(l_rets))
-  
-  #change the returns to price multiples
-  changes <- exp(l_rets/100)
-
-  #initialize first day
-  out[, 1] <- as.vector(initial)*changes[,1]
-  
-  #loop through the matrix 
-  for(i in 2:ncol(l_rets)){
-     out[,i] <- out[,(i-1)]*changes[,i]
-  }
-  
-  return(out)
-}
-
-prices <- list(SP500 = f_convert_log(initial = init[1], daily_rets$SP500),
-               VIX = f_convert_log(initial = init[2], daily_rets$VIX))
+names(prices) <- c("SP500", "VIX")
 ```
 
 
@@ -835,8 +819,8 @@ vixT <- vix[length(vix)][[1]]
 sim_val_mats <- f_logret_to_price(sp_init = spT,
                                   vix_init = vixT, 
                                   sim_rets_sp500 = sim_rets_sp500, 
-                                  sim_rets_vix = sim_rets_vix
-                                  )
+                                  sim_rets_vix = sim_rets_vix,
+                                  n_day)
 
 # unpack matrices 
 sim_price_sp500 <- sim_val_mats$sp500 
@@ -1166,7 +1150,7 @@ load(here("data_out","sim_vol_vix_student_copula.rda"))
 VIX_sim <- colMeans(sim_vol_vix)[5]
 
 #Finding the initial difference between model and ATM
-#delta of the VIX
+#delta of the VIX T = 0
 VIX_model <- fit$par[1] + fit$par[4]
 distance <- VIX - VIX_model
 distance

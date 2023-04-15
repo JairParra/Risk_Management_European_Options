@@ -78,7 +78,7 @@ f_next_Pt <- function(Pt, log_Rt_next){
 }
 
 
-f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix){ 
+f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix, n_ahead){ 
   #### Computes prices from log-returns using simulated returns
   # 
   # INPUTS
