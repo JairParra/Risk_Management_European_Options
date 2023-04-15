@@ -206,6 +206,19 @@ colnames(puts) <- c("K","tau", "IV", "tau_days")
 head(puts)
 tail(puts)
 ```
+
+
+```{r, echo=FALSE}
+## Saving this data into an external datafile : 
+
+# pack the reformatted data 
+Market_clean <- list(sp500 = sp500, vix = vix, rf = rf_mat, calls=calls, puts=puts)
+
+# save to external folder 
+save(Market_clean, file = here("data_out", "Market_clean.rda"))
+```
+
+
 \newpage
 # Pricing a Portfolio of Options 
 
@@ -463,7 +476,7 @@ Assumptions:
 - Disregard time dependence in the bootstrapping process 
 
 
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 # Load required libraries 
 library("fGarch")
 library("MASS")
@@ -653,6 +666,13 @@ head(sim_price_sp500)
 head(sim_rets_vix)
 head(sim_vol_vix)
 ```
+
+```{r}
+# save data from the simulated values 
+save(sim_price_sp500, file=here("data_out", "sim_vol_sp500_student_copula.rda"))
+save(sim_vol_vix, file=here("data_out", "sim_vol_vix_student_copula.rda"))
+```
+
 
 ### Pricing the simulation scenarios 
 
