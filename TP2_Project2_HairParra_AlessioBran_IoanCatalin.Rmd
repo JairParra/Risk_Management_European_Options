@@ -1377,9 +1377,6 @@ alpha # best fitted parameters
 Moneyness <- call_put_data$m
 Tau <- call_put_data$tau
 
-# summary(Moneyness)
-# summary(Tau)
-
 #Initialize x and y axis
 maturity <- seq(from =0, to = 2.5, by = 0.05)
 moneyness <-  seq(from =0, to = 2, by = 0.05)
@@ -1390,7 +1387,7 @@ IV <- matrix(NA, nrow = length(moneyness), ncol = length(maturity))
 # Creating (x,y,z) values for the surface
 for(i in 1:length(moneyness)){
   for(j in 1:length(maturity)){
-    IV[i,j] <- f_sig(alpha, moneyness[i], maturity[j])
+    IV[i,j] <- f_sig_IV(alpha, moneyness[i], maturity[j])
   }
 }
 
@@ -1408,6 +1405,9 @@ persp(x = moneyness, y = maturity, z = IV,
       )
 ```
 
+## Repricing the Portfolio in on week 
+
+We are assuming the same parametric model but shifted by the VIX difference. There is a *distance* between the model and the data, we need to keep the same distance and project it forward when repricing. 
 
 
 \newpage
