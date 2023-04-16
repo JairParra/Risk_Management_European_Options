@@ -143,12 +143,17 @@ price_option <- function(T, K, calls, rf_mat, stock=NULL, S_t=NULL, IV = NULL, p
   # Inputs
   sigma <- NA
   tau = T/250 # days --> years 
+  valid_days <- NULL # will condition for matching days in calls matrix
   days_calls <- calls[,"tau_days"] # extract days column
   days_rf <- rf_mat[, "days"] # extract days from rf_mat
   
   # extract the calls values 
   ab <- get_nearest(T, days_calls) # search lower and upper nearest days to T
-  valid_days <- calls[, "tau_days"] == ab[1] | calls[, "tau_days"] == ab[2] # where match
+  if(length(ab) == 1){
+    valid_days <- calls[, "tau_days"] == ab[1] # where match (one match)
+  }else{ 
+    valid_days <- calls[, "tau_days"] == ab[1] | calls[, "tau_days"] == ab[2] # two matches
+  }
   calls_sub <- calls[ valid_days,  ] # subset valid rows
   calls_sub <- calls_sub[calls_sub[,"K"]==K, ] # subset matching K 
   
@@ -221,7 +226,8 @@ prc_opt <- function(T, K, calls, rf_mat, price_vec, vol_vec){
   #### Wrapper for price_option for two vectors of prices and volatilities 
   # 
   # INPUTS
-  #   T:            [numeric] time to maturity
+  #   T:            [numeric] time to maturity (not a vector)
+  #   K:            [numeric] strike price (not vector)
   #   calls:        [matrix] matrix containing information about tau and IV for different strike prices
   #   rf_mat:       [matrix] matrix containing risk-free term structure
   #   price_vec:    [numeric vector] vector of stock (sp500) prices

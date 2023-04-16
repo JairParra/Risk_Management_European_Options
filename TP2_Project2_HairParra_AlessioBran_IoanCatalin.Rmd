@@ -933,7 +933,7 @@ rug(sim_pl_opt4_two_drivers)
 
 
 \newpage
-# Two risk drivers and copula-marginal model (Student-t and Gaussian Copula) 
+# Two risk drivers and copula-marginal model
 
 1. Compute the daily log-returns of the underlying stock 
 2. Assume the first invariant is generated using a Student-t distribution with $\nu=10$ df and the second invariant is generated using a Student-t distribution with $\nu=5$ df.
@@ -965,7 +965,7 @@ $$
 In this case, a Gaussian copula with two Student-t marginals with CDFs $t(\nu_1)$ with $\nu_1$ degrees of freedom and $t(\nu_2)$ with $\nu_2$ degrees of freedom is given by:
 
 $$
-C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(F_{\nu_1}^{-1}(u), F_{\nu_1}^{-1}(v)), 
+C^{\text{Gauss}}_{\rho}(u,v) = \Phi_{\rho}(F_{\nu_1}^{-1}(u), F_{\nu_2}^{-1}(v)), 
 $$
 where $F_{\nu_1}$ and $F_{\nu_2}$ are their respective CDFs. 
 
@@ -1024,7 +1024,10 @@ theta2
 U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = 10) # sp500
 U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = 5) # vix
 U <- cbind(U1, U2) # join into one matrix
-plot(U, pch = 20, cex = 0.9, main= "Two Student-t Marginals Scatterplot", xlab="SP500 Rets Fit", ylab="VIX Rets Mean")
+plot(U, pch = 20, cex = 0.9,
+     main= "Two Student-t Marginals Scatterplot",
+     xlab="SP500 Rets Fit", 
+     ylab="VIX Rets Mean")
 ```
 
 ### Fitting the copula
@@ -1156,8 +1159,9 @@ save(sim_vol_vix_copula, file=here("data_out", "sim_vol_vix_student_copula.rda")
 Recall the initial (call) options: 
 
 1. **1x** strike $K=1600$ with maturity $T=20d$ 
-2. **1x** strike $K=1605$ with maturity $T=40d$
-3. **1x** strike $K=1800$ with maturity $T=40d$ 
+2. **1x** strike $K=1650$ with maturity $T=20d$
+3. **1x** strike $K=1750$ with maturity $T=40d$ 
+2. **1x** strike $K=1800$ with maturity $T=40d$
 
 **Option Pricing of Simulated Values**
 
@@ -1313,8 +1317,8 @@ First, we do some data preparation with the traded options available. Since for 
 
 ```{r}
 #initialize the last price of the underlying
-S <- Market$sp500[length(Market$sp500)][[1]] #3410
-VIX <- as.numeric(Market$vix[length(Market$vix)])
+S <- sp500[length(sp500)][[1]] #3410
+VIX <- as.numeric(vix[length(vix)])
 
 # convert to draframe for easier manipulation 
 calls_df <- as.data.frame(calls)
@@ -1407,8 +1411,84 @@ persp(x = moneyness, y = maturity, z = IV,
 
 ## Repricing the Portfolio in on week 
 
-We are assuming the same parametric model but shifted by the VIX difference. There is a *distance* between the model and the data, we need to keep the same distance and project it forward when repricing. 
+We are assuming the same parametric model but shifted by the VIX difference. There is a *distance* between the model and the data, we need to keep the same distance and project it forward when repricing. For this we will compute a ratio in change of this distance, and adjust the parameters accordingly. 
 
+```{r}
+#Assuming we take the mean of the 5th simulated day
+VIX_sim <- colMeans(sim_vol_vix_copula)[5]
+
+#Finding the initial difference between model and ATM
+#delta of the VIX T = 0
+VIX_model <- alpha[1] + alpha[4]
+delta <- VIX - VIX_model # distance between market and model 
+
+# Shift the simulated by the distance 
+VIX_model2 <- VIX_sim - delta # VIX_sim - (VIX - VIX_model)
+
+# Compute ratio chane
+delta_ratio <- as.numeric(VIX_model2/VIX_model)
+alpha.adjusted <- alpha*c(delta_ratio, 1, 1, delta_ratio)
+
+# display values 
+print(paste("VIX (last day): ", VIX))
+print(paste("VIX model (a1 + a4): ", VIX_model))
+print(paste("delta (VIX - VIX_model): ", delta))
+print(paste("Shifted VIX (VIX_sim - delta): ", VIX_model2)) 
+print(paste("delta_ratio (Shifted VIX / VIX_model): ", delta_ratio))
+print("alpha (orginal):")
+print(alpha)
+print("alpha.adjusted:") 
+print(alpha.adjusted)
+```
+Next, recall that we had the following Call options in our book: 
+
+```{r}
+option_book
+```
+Using the corresponding volatility, we will reprice them accordingly: 
+
+```{r}
+# MLE estimator for the last spot price (day 5)
+S_T5 = mean(sim_price_sp500_copula[, n_ahead])
+S_vec <- rep(S_t, length(option_book$K)) # repeat the value
+
+# pack the underlying price , strikes and maturities  
+option_book_df <- data.frame(S=S_T5, option_book)
+option_book_df$m <- option_book_df$K / option_book_df$S
+option_book_df$tau_days <- option_book_df$T - 5 # annualized time to maturity
+option_book_df$tau <- option_book_df$tau_days/250 # annualized time to maturity
+
+# compute the IV from the volatility surface (with adjusted alpha)
+f_sig_IV_shifted <- function(m, t){f_sig_IV(alpha.adjusted, m, t)}
+option_book_df$IV <- mapply(f_sig_IV_shifted, option_book_df$m, option_book_df$tau)
+option_book_df
+```
+
+
+```{r, warning=FALSE}
+# create wrapper for prc_opt function 
+prc_opt_wrapper <- function(tau, K, S, IV){
+  prc_opt(T = tau, # prc_opt takes maturity in days -> see doc
+          K = K, # strike prices 
+          calls=calls, 
+          rf_mat = rf_mat, 
+          price_vec = S, # estimated spot price in 5 days
+          vol_vec = IV # recomputed/adjusted volatility in 5 days
+          )
+}
+
+# reprice the porftolio
+option_book_df$repriced_opt <-  mapply(prc_opt_wrapper, 
+                                   option_book_df$tau_days,
+                                   option_book_df$K, 
+                                   option_book_df$S, 
+                                   option_book_df$IV)
+
+# display 
+option_book_df
+```
+
+The `repliced` column provides the reprices portfolio in one week assuming the same fitted parametric model shifted by the one-year ATM implied volatility difference.
 
 \newpage
 # Full Approach 
