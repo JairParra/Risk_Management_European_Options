@@ -50,15 +50,10 @@ library(xts)
 library(zoo)
 library(quantmod)
 
-# additional source code
-# source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
-# source(here("code", "StudentCopulaPdf.R")) # compute the pdf of a normal copula
-# source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
-
 # additional source code for this assg
-source(here("code", "Utils.R")) # display the pdf through a 3-d chart
+source(here("code", "Utils.R")) # misc functions and utils
+source(here("code", "GARCH.R")) # extended GARCH functions and code from class lectures
 source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
-source(here("code", "GARCH.R")) # display the pdf through a 3-d chart
 ```
 
 
@@ -207,7 +202,6 @@ head(puts)
 tail(puts)
 ```
 
-
 ```{r, echo=FALSE}
 ## Saving this data into an external datafile : 
 
@@ -275,17 +269,16 @@ $$
 
 ### BlackScholes function 
 
-```{r}
-# source code with options pricign
-source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
+The Black-Scholes function is implemented under `OptionPricing.R::black-scholes()`: 
 
-# Test: Call Option 
+```{r}
+# Test: Call Option  
 S_t = 1540
 K = 1600 
 r = 0.03
 tau = 10/360 
 sigma = 1.05
-black_scholes(S_t, K, r, tau, sigma)
+black_scholes(S_t, K, r, tau, sigma) 
 ```
 
 ## Book of Options
@@ -331,7 +324,7 @@ The **yield curve** for the given structure of interest rates can be modeled a f
 
 **Example** 
 
-ex.: **1x** strike $K=1600$ with maturity $T=20d$ 
+**1x** strike $K=1600$ with maturity $T=20d$ 
 
 ```{r}
 S_t = sp500[length(sp500)] # last price of underlying 
@@ -340,6 +333,17 @@ IV = vix[length(vix)] # last volatility
 ## test: specific price (func from OptionPricing.R)
 price_option(T=20, K=1600, calls = calls, rf_mat =  rf_mat, stock = NA, S_t = S_t, IV = IV)
 ```
+where, 
+
+- `$Call`: The calculated Call option price 
+- `$Put`: The calculated Put option price (if `put=TRUE`. Set to `FALSE` by default). 
+- `$S`: Underlying price
+- `$K`: Strike price
+- `$r_intep`: Interpolated risk-free rate from the term structure of risk-free rates. 
+- `$calls`: Relevant values from the `calls` matrix. 
+- `$rates`: Rates used to find the interpolation. 
+
+**Pricing the book of options** 
 
 Next, using the function above we price the book of options given: 
 
@@ -620,8 +624,7 @@ head(sim_rets_vix)
 
 ### Computing Prices from Returns 
 
-Next, we crate a function to forecast the 5 day ahead prices from the returns. Since: 
-
+Next, we create a function to forecast the 5 day ahead prices from the returns. Since: 
 
 $$
 \begin{aligned}
@@ -646,7 +649,8 @@ vixT <- vix[length(vix)][[1]]
 sim_val_mats <- f_logret_to_price(sp_init = spT,
                                   vix_init = vixT, 
                                   sim_rets_sp500 = sim_rets_sp500, 
-                                  sim_rets_vix = sim_rets_vix
+                                  sim_rets_vix = sim_rets_vix, 
+                                  n_ahead = n_ahead
                                   )
 
 # unpack matrices 
@@ -727,7 +731,6 @@ Recall the profit functions for European options:
 - $K$: Strike price
 - $c$: Price of Call option
 - $p$: Price of Put option
-
 
 ### Profit at Maturity
 
@@ -1352,7 +1355,8 @@ vixT <- vix[length(vix)][[1]]
 sim_val_mats_full <- f_logret_to_price(sp_init = spT,
                                       vix_init = vixT, 
                                       sim_rets_sp500 = sp500_sim_rets_full, 
-                                      sim_rets_vix = vix_sim_rets_full
+                                      sim_rets_vix = vix_sim_rets_full, 
+                                      n_ahead = n_ahead
                                       )
 
 # unpack matrices 
@@ -1446,7 +1450,7 @@ head(PL_mats_full$PL4)
 
 Next, using all the simulated profits and losses for each of the options, we display a histogram for the distribution for each of the options, for the aggregated 5 days of simulation: 
 
-```{r fig.height=9, fig.width=11, fig.align='center'}
+```{r fig.height=9, fig.width=11, fig.align='center', message=FALSE}
 # flatten the matrices 5-days ahead simulated P/L for the three options 
 sim_pl_opt1_full <- as.vector(PL_mats_full$PL1)
 sim_pl_opt2_full <- as.vector(PL_mats_full$PL2)

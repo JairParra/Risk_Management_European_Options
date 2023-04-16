@@ -53,10 +53,6 @@ library(zoo)
 library(quantmod)
 library(plotly)
 library(mvtnorm)
-# additional source code
-# source(here("code", "NormalCopulaPdf.R")) # compute the pdf of a normal copula
-# source(here("code", "StudentCopulaPdf.R")) # compute the pdf of a normal copula
-# source(here("code", "DisplayCopula.R")) # display the pdf through a 3-d chart
 
 # additional source code for this assg
 source(here("code", "Utils.R")) # display the pdf through a 3-d chart
@@ -433,8 +429,6 @@ distribution fitted to the past invariants
 mean_sp500 = mean(sp500_rets) #mean of sp500
 sd_sp500 = sd(sp500_rets) #standard deviation of sp500
 
-
-
 #initialize matrix of returns forecasted until T+5
 sp500_rets_forecast = matrix(NA,10000,5)
 
@@ -557,7 +551,7 @@ opt4_VaR_ES#Showing the VaR95 and ES95 option 4 of our book of options
 rets <- cbind(sp500_rets, vix_rets)
 
 #Number of days ahead
-n_day <- 5
+n_ahead <- 5
 
 #Assume that the distribution is normally fitted
 mu <- apply(rets, 2, mean)
@@ -572,7 +566,7 @@ rets_day <- matrix(NA, n_sim)
 
 #iterations
 set.seed(1234)
-for(i in 1:n_day){
+for(i in 1:n_ahead){
     updated_rets <- rmvnorm(mean = mu, sigma = Sigma, n = n_sim)
     
     if(i == 1){

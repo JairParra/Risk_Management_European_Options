@@ -6,14 +6,8 @@
 ###############################################################################
 ###############################################################################
 
-####################
-### 0. Packages ####
-####################
-
-###############################################################################
-
 ##################################
-### 1. Objtect Initialization ####
+### 1. Object Initialization ####
 ##################################
 
 initialize_sim_mats <- function(sim_mat, lnames=NULL, num_mats=3){
@@ -78,7 +72,7 @@ f_next_Pt <- function(Pt, log_Rt_next){
 }
 
 
-f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix, n_ahead){ 
+f_logret_to_price <- function(sp_init = NULL, vix_init = NULL, sim_rets_sp500 = NULL, sim_rets_vix = NULL, n_ahead = 5){ 
   #### Computes prices from log-returns using simulated returns
   # 
   # INPUTS
@@ -91,6 +85,13 @@ f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix, n
   #   mats:             [list of matrices] List containing two (n_sim x n_steps) matrices with 
   #                     prices (or values for the vix) computed from the log returns and initial prices.
   
+  # set up a variable if any of the vix arguments is null (not supplied)
+  vix_null <- is.null(vix_init) | is.null(sim_rets_vix)
+  
+  # make sure that at least the sp500 is passed 
+  if(is.null(sp_init) || is.null(sim_rets_sp500)){ 
+    stop("either sp_init or sim_rets_sp500 were not supplied")
+  }
   
   # Initialize empty matrices for the simulated sp500 and vix values
   sim_val_mats <- initialize_sim_mats(sim_rets_sp500, 
@@ -100,21 +101,29 @@ f_logret_to_price <- function(sp_init, vix_init, sim_rets_sp500, sim_rets_vix, n
   
   # Initialize the first prices 
   sim_val_mats$sp500[, 1] <- f_next_Pt(sp_init, sim_rets_sp500[, 1])
-  sim_val_mats$vix[, 1] <- f_next_Pt(vix_init, sim_rets_vix[, 1])
+  if(!vix_null){
+    sim_val_mats$vix[, 1] <- f_next_Pt(vix_init, sim_rets_vix[, 1])
+  }
   
   # for each day ahead
   for(t in 2:n_ahead){
     # obtain the values for P_{t-1}
     Pt_prev_sp500 <- sim_val_mats$sp500[, t-1] 
-    Pt_prev_vix <- sim_val_mats$vix[, t-1] 
+    if(!vix_null){
+      Pt_prev_vix <- sim_val_mats$vix[, t-1] 
+    }
     
     # extract current returns R_{t}
     Rt_sp500 <- sim_rets_sp500[, t] 
-    Rt_vix <- sim_rets_vix[, t]
+    if(!vix_null){
+      Rt_vix <- sim_rets_vix[, t]
+    }
     
     # compute and assign next price ahead using current returns
     sim_val_mats$sp500[, t] <- f_next_Pt(Pt_prev_sp500, Rt_sp500) 
-    sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix) 
+    if(!vix_null){
+      sim_val_mats$vix[, t] <- f_next_Pt(Pt_prev_vix, Rt_vix)
+    }
     
   }
   

@@ -249,7 +249,7 @@ prc_opt <- function(T, K, calls, rf_mat, price_vec, vol_vec){
 }
 
 
-f_opt_price_simulation <- function(sim_price_sp500, sim_vol_vix, K_vec, T_vec, put=FALSE){
+f_opt_price_simulation <- function(sim_price_sp500 = NULL, sim_vol_vix = NULL, K_vec = NULL, T_vec = NULL, put=FALSE){
   #### Computes Option prices (premiums) based on input simulation matrices, option prices and maturities 
   # 
   # INPUTS
@@ -263,8 +263,13 @@ f_opt_price_simulation <- function(sim_price_sp500, sim_vol_vix, K_vec, T_vec, p
   #   mats:       [list of matrices] List containing three matrices of compatible sizes containing the 
   #               option prices (premiums) for the corresponding prices and market volatilities (vix) 
   
+  # verify that at least sp500 arguments are given 
+  if(is.null(sim_price_sp500)){
+    stop("sim_pricesp500 must be supplied")
+  }
+  
   # safety check 
-  if(ncol(sim_price_sp500) != ncol(sim_vol_vix)) {
+  if(!is.null(sim_vol_vix) & (ncol(sim_price_sp500) != ncol(sim_vol_vix))) {
     stop("Incompatible sim_price_sp500 and sim_vol_vix matrix sizes") 
   }
   if(length(K_vec) != length(T_vec)){
