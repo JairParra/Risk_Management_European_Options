@@ -43,17 +43,28 @@ options("scipen" = 10)
 
 ### Libraries 
 
-```{r, message=FALSE, echo=FALSE}
+```{r, message=FALSE, warning=FALSE}
 # Preload R libraries we will use 
-library(here)
-library(xts) 
-library(zoo)
-library(quantmod)
+library("here")
+library("xts") 
+library("zoo")
+library("MASS")
+library("Matrix") 
+library("fGarch") # to fit distr
+library("copula") # to fit Copulas 
+library("plotly") # used to plot the volatility surface
+library("mvtnorm") # multivariate Gaussian 
+library("quantmod") 
+
+# plotting 
+library("rgl")
+library("akima")
 
 # additional source code for this assg
 source(here("code", "Utils.R")) # misc functions and utils
 source(here("code", "GARCH.R")) # extended GARCH functions and code from class lectures
 source(here("code", "OptionPricing.R")) # BlackScholes and Option pricing
+source(here("code", "VolatilitySurface.R")) # Fitting and compu. vol. surface
 ```
 
 
@@ -139,6 +150,8 @@ rf_mat
 ```
 
 ```{r, echo=FALSE}
+### this block not included in the PDF
+
 # turn into dataframe
 rf_df <- data.frame(rf_mat)
 rf_df$years2 <- rf_df$years**2 
@@ -152,7 +165,7 @@ preds <- predict(rf_lm)
 
 # extract index 
 x <- rf_df$years
-ix  <- sort(x, index.return=T)$ix
+ix  <- sort(x, index.return=TRUE)$ix
 
 # 
 plot(x, rf_df$rf, 
@@ -202,8 +215,9 @@ head(puts)
 tail(puts)
 ```
 
+
 ```{r, echo=FALSE}
-## Saving this data into an external datafile : 
+## Saving this data into an external datafile (not included in out pdf) 
 
 # pack the reformatted data 
 Market_clean <- list(sp500 = sp500, vix = vix, rf = rf_mat, calls=calls, puts=puts)
@@ -272,13 +286,13 @@ $$
 The Black-Scholes function is implemented under `OptionPricing.R::black-scholes()`: 
 
 ```{r}
-# Test: Call Option  
+# Test: Call Option 
 S_t = 1540
 K = 1600 
 r = 0.03
 tau = 10/360 
 sigma = 1.05
-black_scholes(S_t, K, r, tau, sigma) 
+black_scholes(S_t, K, r, tau, sigma)
 ```
 
 ## Book of Options
@@ -291,6 +305,17 @@ Assume the following book of **European Call Options:**
 2. **1x** strike $K=1800$ with maturity $T=40d$
 
 Find the price of this book given **the last underlying price** and the **last implied volatility** (take the VIX for all options). Use **Black-Scholes** to price the options. Take the current term structure and **linearly interpolate** to find the corresponding rates. Use 360 days/year for the term structure and **250 days/year** for the maturity of the options. 
+
+We pack these into a list: 
+
+```{r}
+# Initialize strikes and maturities the options 
+T_vec <- c(20, 20, 40,40) #  maturities 
+K_vec <- c(1600, 1650, 1750, 1800) # Strikes
+option_book <- list(T = T_vec, K = K_vec)
+option_book
+```
+
 
 ### Nearest values 
 
@@ -310,12 +335,7 @@ $$
 y = y_1 + \dfrac{(x-x_1)(y_2-y_1)}{(x_2-x_1)}
 $$
 
-```{r}
-# Function to interpolate y given two points
-interpolate <- function(x,x1=1,y1=1,x2=2,y2=2){
-  y1 + (x-x1)*(y2-y1)/(x2-x1)
-}
-```
+This function `interpolate()` is implemented under the `OptionPricing.R` script. 
 
 
 ### Finding the rates through interpolation 
@@ -333,6 +353,7 @@ IV = vix[length(vix)] # last volatility
 ## test: specific price (func from OptionPricing.R)
 price_option(T=20, K=1600, calls = calls, rf_mat =  rf_mat, stock = NA, S_t = S_t, IV = IV)
 ```
+
 where, 
 
 - `$Call`: The calculated Call option price 
@@ -344,6 +365,7 @@ where,
 - `$rates`: Rates used to find the interpolation. 
 
 **Pricing the book of options** 
+
 
 Next, using the function above we price the book of options given: 
 
@@ -380,28 +402,538 @@ price_option(T=40, K=1750, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 # Fourth Call Option 
 price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 ```
+
+# Some Theoretical Workings 
+
+We present some important theory from which we based the implementation of a variety of the functions we use in this project. 
+
+## Log-returns 
+
+The **discrete returns** are given by: 
+
+$$
+R_{t+1} = \dfrac{P_{t+1} - P_{t}}{P_{t}}
+$$
+
+and the next ahead log-returns are given by: 
+
+$$
+\log(R_{t+1}) = \log(P_{t+1} - P_{t}) - \log(P_{t})
+$$
+
+Since this is shared by all the subsequent parts, we compute the log-returns for both of the indexes. 
+
+```{r, message=FALSE}
+# load required libraries 
+library("PerformanceAnalytics")
+
+# calculate returns
+sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
+vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
+
+# remove first return 
+sp500_rets <- sp500_rets[-1] 
+vix_rets <- vix_rets[-1]
+
+# remove nas 
+sp500_rets[is.na(sp500_rets)] <- 0
+vix_rets[is.na(vix_rets)] <- 0
+
+# display
+head(sp500_rets) 
+head(vix_rets)
+```
+
+### Computing Prices from Returns 
+
+In order to produce forecasts, we crate a function to forecast the 5 day ahead prices from the returns. Since: 
+
+$$
+\begin{aligned}
+R_{t} = \dfrac{P_{t} - P_{t-1}}{P_{t-1}} \\
+\implies R_{t} = \dfrac{P_{t}}{P_{t-1}} - 1 \\ 
+\implies \log(R_{t}) = \log\left( \dfrac{P_{t}}{P_{t-1}} \right) \\ 
+\implies \log(R_{t}) = \log(P_{t}) - \log(P_{t-1}) \\ 
+\implies \log(P_{t}) = \log(R_{t})+ \log(P_{t-1}) \\ 
+\implies P_{t} = \exp(\log(R_{t})+ \log(P_{t-1}) ) \\ 
+\implies P_{t+1} = \exp(\log(R_{t+1})+ \log(P_{t}) )
+\end{aligned}
+$$
+
+This logic is implemented in the `f_next_Pt()` and `f_logret_to_price()`, lkocated under the `code/Utils.R` folder. 
+
+## Value at Risk (VaR) and Expected Shortfall (ES) 
+
+**VaR:** For a random variable $X$, the **Value-at-Risk (VaR)** at level $\alpha$ is defined as the $\alpha$-lower quantile of the distribution of X, thus: 
+$$
+VaR_X(\alpha) = F^{-1}_{X}(1 - \alpha)
+$$
+**ES:** Expected shortfall is calculated by averaging all of the returns in the distribution that are worse than the VAR of the portfolio at a given level of confidence.
+
+## Profit of an European Option
+
+The profit functions of a long call and a long put are given by: 
+
+$$
+\begin{aligned}
+\pi^{\text{Long Call}} = \max(S_T - K, 0) - c \\ 
+\pi^{\text{Long Put}} = \max(K - S_T, 0) - p
+\end{aligned}
+$$
+, where: 
+
+- $S$: Spot price (current)
+- $S_0$: Spot price at the begining of the option
+- $S_T$: Spot price at maturity
+- $T$: Maturity of option
+- $K$: Strike price
+- $c$: Price of Call option
+- $p$: Price of Put option
+
+ 
 \newpage
 # One risk driver and Gaussian Model 
 
+Steps:
+
+1. Compute the daily log-returns of the underlying stock.
+2. Assume they are iid normally distributed.
+3. Generate 10 000 scenarios for the one-week ahead (five days) underlying price using the normal
+distribution fitted to the past invariants.
+4. Determine the P&L distribution of the book of options, using the simulated underlying values. Assume
+the implied volatility stays the same. Take interpolated rates for the term structure.
+5. Compute the VaR95 and the ES95.
+
+
+## Gaussian fit to underlying and simulation 
+
 ```{r}
-#####################################################
-###  ---> INSERT YOUR PART FROM HERE (IOAN) <---- ###
-############################################## ######
+# simulation parameters 
+n_ahead = 5  # number of days ahead
+n_sim = 10000 # number of simulations
+
+# Obtain MLE Gaussian parameters from the log-returns 
+mean_sp500 = mean(sp500_rets) #mean of sp500
+sd_sp500 = sd(sp500_rets) #standard deviation of sp500
+
+# examine parameters 
+mean_sp500 
+sd_sp500
 ```
 
+```{r}
+#initialize matrix of returns forecasted until T+5
+sp500_rets_forecast = matrix(NA,n_sim, n_ahead)
+
+# simulate for each day-ahead 
+for(t in 1:n_ahead)
+{
+  # sample 10k times from the Gaussian with MLE fitted parameters
+  sp500_rets_forecast[, t] = rnorm(n_sim,
+                                    mean = mean_sp500,
+                                    sd = sd_sp500)
+}
+
+# assign column names to simulations 
+colnames(sp500_rets_forecast) = c("T+1", "T+2", "T+3", "T+4", "T+5")
+
+# display 
+head(sp500_rets_forecast)
+```
+## Computing Prices from Returns 
+
+
+```{r}
+# Obtain Initial values (last value of indexes) 
+spT <- sp500[length(sp500)][[1]]
+vixT <- vix[length(vix)][[1]]
+
+# calculate the price and values from the simulated log-returns 
+sim_val_mats_one_driver <- f_logret_to_price(sp_init = spT,
+                                             sim_rets_sp500 = sp500_rets_forecast, 
+                                             n_ahead = n_ahead
+                                             )
+
+# unpack matrices 
+sim_price_sp500_one_driver <- sim_val_mats_one_driver$sp500 
+
+# compare simulated returns with the price
+head(sim_price_sp500_one_driver)
+```
+
+
+```{r}
+# save data from the simulated values 
+save(sim_price_sp500_one_driver, file=here("data_out", "sim_price_sp500_one_driver.rda"))
+```
+
+
+## Pricing the simulations and Profit/Loss Distribution
+
+**Option Pricing of Simulated Values**
+
+Next, we calculate the price of the book of options for the simulated values using the `f_opt_price_simulation()` function under `code/OptionPricing.R`: 
+
+
+```{r}
+# random seed for replication 
+set.seed(123)
+
+# obtain number of strike prices 
+n_K <- length(option_book$K)
+
+# generate option names for the list 
+optnames <- as.vector(mapply(paste0, rep("opt", n_K), seq(1:n_K)))
+
+# Initialize Profit/Loss mats for each option in the book 
+call_price_matrices <- initialize_sim_mats(sim_price_sp500_one_driver,# copy mat dims
+                                           num_mats = length(K_vec), 
+                                           lnames=optnames
+                                           )
+
+# Initialize Profit/Loss mats for each option in the book 
+PL_matrices <- initialize_sim_mats(sim_price_sp500_one_driver, 
+                                   num_mats = length(K_vec), 
+                                   lnames=optnames
+                                   )
+
+#Loop to calculate the P&L of each option from our book of options
+for(i in 1:n_K) # each of the options 
+{
+  for(j in 1:n_ahead) # for each of the days 
+  {
+    # compute the call price for the i-th option at the j-th day 
+    price_call = prc_opt(option_book$T[i]-j, # shifted maturity
+                         option_book$K[i], # strike price 
+                         calls, # matrix of calls values
+                         rf_mat, # structure of risk-free rates
+                         sim_price_sp500_one_driver[,j], 
+                         vix[[length(vix)]]) # use the last day of the vix for all options prices
+    
+    # Assign the Call price to matrix
+    call_price_matrices[[i]][,j] = price_call
+    
+    # Compute and assign profit loss for opt i at  day j
+    PL_matrices[[i]][,j] = option_profit(S = sim_price_sp500_one_driver[,j], 
+                                         K = option_book$K[i],
+                                         c = price_call)$call_profit
+    
+  }
+}
+```
+
+
+**Option Pricing of Simulated Values**
+
+```{r}
+# option prices for each of the options 
+head(call_price_matrices$opt1)
+head(call_price_matrices$opt2)
+head(call_price_matrices$opt3)
+head(call_price_matrices$opt4)
+```
+**Distribution of Options P/L** 
+
+```{r}
+#showing the values of the P&L distribution for the first option where T = 20 and K = 1600
+head(PL_matrices$opt1)
+head(PL_matrices$opt2)
+head(PL_matrices$opt3)
+head(PL_matrices$opt4)
+```
+
+**Distribution of Options P/L** 
+
+Next, using all the simulated profits and losses for each of the options, we display a histogram for the distribution for each of the options, for the aggregated 5 days of simulation: 
+
+```{r fig.height=8, fig.width=10, fig.align='center', message=FALSE, warning=FALSE}
+# flatten the matrices 5-days ahead simulated P/L for the three options 
+sim_pl_opt1_one_driver <- as.vector(PL_matrices$opt1)
+sim_pl_opt2_one_driver <- as.vector(PL_matrices$opt2)
+sim_pl_opt3_one_driver <- as.vector(PL_matrices$opt3)
+sim_pl_opt4_one_driver <- as.vector(PL_matrices$opt4)
+
+# Compute the 95% VaR and 95% ES
+opt1_one_driver_VaR_ES <- f_VaR_ES(sim_pl_opt1_one_driver, alpha = 0.05)
+opt2_one_driver_VaR_ES <- f_VaR_ES(sim_pl_opt2_one_driver, alpha = 0.05)
+opt3_one_driver_VaR_ES <- f_VaR_ES(sim_pl_opt3_one_driver, alpha = 0.05)
+opt4_one_driver_VaR_ES <- f_VaR_ES(sim_pl_opt4_one_driver, alpha = 0.05)
+
+# plot the distribution for each of the options 
+par(mfrow = c(2,2))
+
+# distribution of first option 
+hist(sim_pl_opt1_one_driver, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[1], " T=", T_vec[1], " (Call)"))
+lines(density(sim_pl_opt1_one_driver), lwd=2, col="blue")
+abline(v=opt1_one_driver_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt1_one_driver_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt1_one_driver)
+
+
+# distribution of second option 
+hist(sim_pl_opt2_one_driver, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[2], " T=", T_vec[2], " (Call)"))
+lines(density(sim_pl_opt2_one_driver), lwd=2, col="blue")
+abline(v=opt2_one_driver_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt2_one_driver_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt2_one_driver)
+
+
+# distribution of third option 
+hist(sim_pl_opt3_one_driver, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[3], " T=", T_vec[3], " (Call)"))
+lines(density(sim_pl_opt3_one_driver), lwd=2, col="blue")
+abline(v=opt3_one_driver_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt3_one_driver_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt3_one_driver)
+
+
+# distribution of fourth option 
+hist(sim_pl_opt4_one_driver, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[4], " T=", T_vec[4], " (Call)"))
+lines(density(sim_pl_opt4_one_driver), lwd=2, col="blue")
+abline(v=opt4_one_driver_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt4_one_driver_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt4_one_driver)
+
+```
+
+## VaR and ES 
+
+In what follows, we compute the 95% VaR and 95% ES for the P/L for the book of options (drawn as a red and black vertical lines in the previous plots). 
+
+### 95% VaR 
+
+```{r}
+opt1_one_driver_VaR_ES$VaR # first option 
+opt2_one_driver_VaR_ES$VaR # second option 
+opt3_one_driver_VaR_ES$VaR # third option 
+opt4_one_driver_VaR_ES$VaR # fourth option 
+```
+
+### 95% ES
+
+```{r}
+opt1_one_driver_VaR_ES$ES # first option 
+opt2_one_driver_VaR_ES$ES # second option 
+opt3_one_driver_VaR_ES$ES # third option 
+opt4_one_driver_VaR_ES$ES # fourth option 
+```
 
 \newpage
 # Two risk drivers and Gaussian Model 
 
+1. Compute the daily log-returns of the underlying stock.
+2. Compute the daily log-returns of the VIX.
+3. Assume they are invariants normally distributed.
+4. Generate 10 000 scenarios for the one-week ahead underlying price and the one week ahead VIX value
+   using the normal distribution fitted to the past risk drivers.
+5. Determine the P&L distribution of the book of options, using the simulated values. Take interpolated
+   rates for the term structure.
+   
+### Multivariate Gaussian Distribution 
+
+A random vector with a multivariate Gaussian dsitribution has pdf given by: 
+
+$$
+f(x) = \dfrac{1}{(2\pi)^{d/2}|\Sigma|^{-1}} \exp\left( -\dfrac{1}{2}(x - \mu)^{T}\Sigma^{-1}(x - \mu) \right), 
+$$
+
+where the mean vector $\mu$ and covariance matrix $\Sigma$ are given by: 
+
+$$
+\mu := \mathbb{E}[X] \;\;\;\;,\;\;\; \Sigma := Cov(X) = \mathbb{E}[(X-\mu)(X-\mu)^{T}] , 
+$$
+   
+## Generating the simulation scenarios
+   
 ```{r}
-#####################################################
-###  ---> INSERT YOUR PART FROM HERE (ALESSIO) <---- ###
-############################################## ######
+# random seed for replication 
+set.seed(1234)
+
+# Simulation parameters
+n_sim = 10000 # set number of simulations
+n_ahead = 5 # days ahead to produce samples 
+
+# MLE parameters to fit Bivariate Gaussian 
+rets <- rets <- cbind(sp500_rets, vix_rets)
+mu <- apply(rets, 2, mean)
+Sigma <- cov(rets)
+
+# preallocate matrices to store simulations
+sim_rets_sp500_two_drivers <- matrix(NA, nrow = n_sim, ncol=n_ahead)
+sim_rets_vix_two_drivers <- matrix(NA, nrow = n_sim, ncol=n_ahead)
+
+# assign days ahead 
+colnames(sim_rets_sp500_two_drivers) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+colnames(sim_rets_vix_two_drivers) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+
+# perfom n_ahead days of n_sim scenarios 
+for(t in 1:n_ahead){ 
+  
+  # Sample n_sim times from Bivariate Gaussian
+  U_sim <- rmvnorm(mean = mu, sigma = Sigma, n = n_sim)
+  
+  # store simulation of log return in matrix
+  sim_rets_sp500_two_drivers[ ,t] <- U_sim[, 1]
+  sim_rets_vix_two_drivers[ ,t] <- U_sim[, 2]
+}
+
+# preview of simulated log returns
+head(sim_rets_sp500_two_drivers)
+head(sim_rets_vix_two_drivers)
+```
+### Computing Prices from Returns 
+
+$$
+P_{t+1} = \exp(\log(R_{t+1})+ \log(P_{t}))
+$$
+
+```{r}
+# Obtain Initial values (last value of indexes) 
+spT <- sp500[length(sp500)][[1]]
+vixT <- vix[length(vix)][[1]]
+
+# calculate the price and values from the simulated log-returns 
+sim_val_mats_two_drivers <- f_logret_to_price(sp_init = spT,
+                                             vix_init = vixT, 
+                                             sim_rets_sp500 = sim_rets_sp500_two_drivers, 
+                                             sim_rets_vix = sim_rets_vix_two_drivers
+                                             )
+
+# unpack matrices 
+sim_price_sp500_two_drivers <- sim_val_mats_two_drivers$sp500 
+sim_vol_vix_two_drivers <- sim_val_mats_two_drivers$vix
+```
+
+```{r}
+# compare simulated returns with the price
+head(sim_rets_sp500_two_drivers)
+head(sim_price_sp500_two_drivers) 
+```
+
+
+```{r}
+# compare simulatedlog rets with volatility 
+head(sim_rets_vix_two_drivers)
+head(sim_vol_vix_two_drivers)
+```
+
+```{r}
+# save data from the simulated values 
+save(sim_price_sp500_two_drivers, file=here("data_out", "sim_vol_sp500_student_two_driver.rda"))
+save(sim_vol_vix_two_drivers, file=here("data_out", "sim_vol_vix_student_two_driver.rda"))
+```
+
+### Pricing the simulation scenarios 
+
+Recall the initial (call) options: 
+
+1. **1x** strike $K=1600$ with maturity $T=20d$ 
+2. **1x** strike $K=1650$ with maturity $T=20d$
+3. **1x** strike $K=1750$ with maturity $T=40d$ 
+2. **1x** strike $K=1800$ with maturity $T=40d$
+
+**Option Pricing of Simulated Values**
+
+Next, we calculate the price of the book of options for the simulated values using the `f_opt_price_simulation()` function under `code/OptionPricing.R`: 
+
+```{r}
+# random seed for replication 
+set.seed(123)
+
+# Obtain the obtion prices from simulation values 
+opt_price_mats_two_drivers <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500_two_drivers, 
+                                                     sim_vol_vix = sim_vol_vix_two_drivers, 
+                                                     K_vec = option_book$K, 
+                                                     T_vec = option_book$T, 
+                                                     put=FALSE)
+
+```
+
+
+```{r}
+# overview of dataframes
+head(opt_price_mats_two_drivers$opt1)
+head(opt_price_mats_two_drivers$opt2)
+head(opt_price_mats_two_drivers$opt3)
+head(opt_price_mats_two_drivers$opt4)
+```
+
+
+```{r}
+# Compute the profits and loses for the simulation  from the simulated option premiums
+PL_mats_two_drivers <- f_pl_simulation(sim_price_sp500 = sim_price_sp500_two_drivers, 
+                                       opt_price_mats = opt_price_mats_two_drivers, 
+                                       K_vec =option_book$K)
+```
+
+```{r}
+# display profit matrices 
+head(PL_mats_two_drivers$PL1)
+head(PL_mats_two_drivers$PL2)
+head(PL_mats_two_drivers$PL3)
+head(PL_mats_two_drivers$PL4)
+```
+
+
+**Distribution of Options P/L** 
+
+Next, using all the simulated profits and losses for each of the options, we display a histogram for the distribution for each of the options, for the aggregated 5 days of simulation: 
+
+```{r fig.height=9, fig.width=11, fig.align='center', message=FALSE}
+# flatten the matrices 5-days ahead simulated P/L for the three options 
+sim_pl_opt1_two_drivers <- as.vector(PL_mats_two_drivers$PL1)
+sim_pl_opt2_two_drivers <- as.vector(PL_mats_two_drivers$PL2)
+sim_pl_opt3_two_drivers <- as.vector(PL_mats_two_drivers$PL3)
+sim_pl_opt4_two_drivers <- as.vector(PL_mats_two_drivers$PL4)
+
+# Compute the 95% VaR and 95% ES
+opt1_two_drivers_VaR_ES <- f_VaR_ES(sim_pl_opt1_two_drivers, alpha = 0.05)
+opt2_two_drivers_VaR_ES <- f_VaR_ES(sim_pl_opt2_two_drivers, alpha = 0.05)
+opt3_two_drivers_VaR_ES <- f_VaR_ES(sim_pl_opt3_two_drivers, alpha = 0.05)
+opt4_two_drivers_VaR_ES <- f_VaR_ES(sim_pl_opt4_two_drivers, alpha = 0.05)
+
+# plot the distribution for each of the options 
+par(mfrow = c(2,2))
+
+# distribution of first option 
+hist(sim_pl_opt1_two_drivers, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[1], " T=", T_vec[1], " (Call)"))
+lines(density(sim_pl_opt1_two_drivers), lwd=2, col="blue")
+abline(v=opt1_two_drivers_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt1_two_drivers_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt1_two_drivers)
+
+# distribution of second option 
+hist(sim_pl_opt2_two_drivers, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[2], " T=", T_vec[2], " (Call)"))
+lines(density(sim_pl_opt2_two_drivers), lwd=2, col="blue")
+abline(v=opt2_two_drivers_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt2_two_drivers_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt2_two_drivers)
+
+# distribution of third option 
+hist(sim_pl_opt3_two_drivers, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[3], " T=", T_vec[3], " (Call)"))
+lines(density(sim_pl_opt3_two_drivers), lwd=2, col="blue")
+abline(v=opt3_two_drivers_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt3_two_drivers_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt3_two_drivers)
+
+# distribution of fourth option 
+hist(sim_pl_opt4_two_drivers, nclass = round(10 * log(n_sim)), 
+     probability = TRUE, xlab=paste0("K=", K_vec[4], " T=", T_vec[4], " (Call)"))
+lines(density(sim_pl_opt4_two_drivers), lwd=2, col="blue")
+abline(v=opt4_two_drivers_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt4_two_drivers_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt4_two_drivers)
 ```
 
 
 \newpage
-## Two risk drivers and copula-marginal model (Student-t and Gaussian Copula) 
+# Two risk drivers and copula-marginal model (Student-t and Gaussian Copula) 
 
 1. Compute the daily log-returns of the underlying stock 
 2. Assume the first invariant is generated using a Student-t distribution with $\nu=10$ df and the second invariant is generated using a Student-t distribution with $\nu=5$ df.
@@ -410,7 +942,7 @@ price_option(T=40, K=1800, calls=calls, rf_mat=rf_mat, S_t = S_t, IV = IV)
 5. Determine the P&L distribution of the book of options, using the simulated values. 
 6. Take interpolated rates for the term structure.  
 
-### Gaussian Copula with two Student-t marginals
+## Gaussian Copula with two Student-t marginals
 
 A bivariate distribution $H$ can be formed via a copula $C$ from two marginal distributions with CDFs $F$ and $G$ via:
 
@@ -438,42 +970,7 @@ $$
 where $F_{\nu_1}$ and $F_{\nu_2}$ are their respective CDFs. 
 
 
-### Log-returns 
-
-The **discrete returns** are given by: 
-
-$$
-R_{t+1} = \dfrac{P_{t+1} - P_{t}}{P_{t}}
-$$
-
-and the next ahead log-returns are given by: 
-
-$$
-\log(R_{t+1}) = \log(P_{t+1} - P_{t}) - \log(P_{t})
-$$
-
-```{r, message=FALSE}
-# load reqruired libraries 
-library("PerformanceAnalytics")
-
-# calculate returns
-sp500_rets <- PerformanceAnalytics::CalculateReturns(sp500, method="log")
-vix_rets <- PerformanceAnalytics::CalculateReturns(vix, method="log")
-
-# remove first return 
-sp500_rets <- sp500_rets[-1] 
-vix_rets <- vix_rets[-1]
-
-# remove nas 
-sp500_rets[is.na(sp500_rets)] <- 0
-vix_rets[is.na(vix_rets)] <- 0
-
-# display
-head(sp500_rets) 
-head(vix_rets)
-```
-
-### Generating the simulation scenarios 
+## Generating the simulation scenarios 
 
 Assumptions: 
 - Marginal Student-t distributions 
@@ -481,12 +978,6 @@ Assumptions:
 
 
 ```{r, warning=FALSE, message=FALSE}
-# Load required libraries 
-library("fGarch")
-library("MASS")
-library("copula")
-library("Matrix")
-
 # random seed for replication 
 set.seed(123)
 
@@ -502,6 +993,7 @@ sigma <- c(sd(sp500_rets_vec), sd(vix_rets_vec))
 mu
 sigma
 ```
+### Fitting Student-t to the marginals 
 
 ```{r}
 ## Fit marginals by MLE
@@ -527,42 +1019,37 @@ theta1
 theta2
 ```
 
-
 ```{r}
 # Fit Student-t to the marginals
-# U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = theta1[3]) # sp500
-# U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = theta2[3]) # vix
 U1 <- pstd(sp500_rets_vec, mean = theta1[1], sd = theta1[2], nu = 10) # sp500
 U2 <- pstd(vix_rets_vec,mean = theta2[1], sd = theta2[2], nu = 5) # vix
-# U1 <- pt(sp500_rets_vec, df = 5) # sp500
-# U2 <- pt(vix_rets_vec, df = 10) # vix
 U <- cbind(U1, U2) # join into one matrix
-plot(U, pch = 20, cex = 0.9)
+plot(U, pch = 20, cex = 0.9, main= "Two Student-t Marginals Scatterplot", xlab="SP500 Rets Fit", ylab="VIX Rets Mean")
 ```
 
+### Fitting the copula
 
 ```{r}
 # Obtain the best rho for the Gaussian Copula
-C <- normalCopula(dim = 2)
-fit <- fitCopula(C, data = U, method = "ml")
+C <- copula::normalCopula(dim = 2)
+fit <- copula::fitCopula(C, data = U, method = "ml")
 fit
 ```
-
+### Sampling from the copula 
 
 ```{r}
+## TEST: Sampling from copula n_sim times for one day
+
 # seed for replication
 set.seed(420)
 
 # Simulation parameters
 n_sim = 10000 # set number of simulations
-# n_ahead = 5 # days ahead to produce samples
 
 # produce simulations from copula
 U_sim <- rCopula(n_sim, fit@copula)
 
 # use copula U_sim to reproduce the marginals with student-t distr
-# rets1_sim <- qstd(U_sim[,1], mean = mu[1], sd = sigma[1], nu = theta1[3]) # sp500
-# rets2_sim <- qstd(U_sim[,2], mean = mu[1], sd = sigma[1], nu = theta2[3]) # vix
 rets1_sim <- qstd(U_sim[,1], mean = mu[1], sd = sigma[1], nu = 10) # sp500
 rets2_sim <- qstd(U_sim[,2], mean = mu[1], sd = sigma[1], nu = 5) # vix
 rets_sim <- cbind(rets1_sim, rets2_sim)
@@ -573,6 +1060,8 @@ hist(rets1_sim, nclass=50)
 hist(rets2_sim, nclass=50)
 hist(rets_sim, nclass = round(10 * log(n_sim)))
 ```
+
+We can now sample for the five days of interest using the fitted copula with marginal Student-t for the invariants: 
 
 
 ```{r}
@@ -588,12 +1077,12 @@ n_sim = 10000 # set number of simulations
 n_ahead = 5 # days ahead to produce samples 
 
 # preallocate matrices to store simulations
-sim_rets_sp500 <- matrix(NA, nrow = n_sim, ncol=5)
-sim_rets_vix <- matrix(NA, nrow = n_sim, ncol=5)
+sim_rets_sp500_copula <- matrix(NA, nrow = n_sim, ncol=5)
+sim_rets_vix_copula <- matrix(NA, nrow = n_sim, ncol=5)
 
 # assign days ahead 
-colnames(sim_rets_sp500) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
-colnames(sim_rets_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+colnames(sim_rets_sp500_copula) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
+colnames(sim_rets_vix_copula) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
 
 ##############################
 ### Running the simulation ###
@@ -602,7 +1091,7 @@ colnames(sim_rets_vix) <- c("T+1", "T+2", "T+3", "T+4", "T+5")
 # perform n_head days of n_sim scenarios
 for(t in 1:n_ahead){
 
-  # Sample 5-days ahead from Gaussian Copula
+  # Sample n_sim times from Gaussian Copula
   U_sim <- rCopula(n_sim, fit@copula)
   
   # use copula U_sim to reproduce the marginals quantiles F^{-1}(u) with student-t distr
@@ -610,71 +1099,55 @@ for(t in 1:n_ahead){
   rets2_sim <- qstd(U_sim[,2], mean = theta2[1], sd = theta2[2], nu = 5) # vix
   # rets1_sim <- qt(U_sim[,1], df = 10) # sp500
   # rets2_sim <- qt(U_sim[,2], df = 5) # vix
-  rets_sim <- cbind(rets1_sim, rets2_sim)
-  
+
   # store simulation of log return in matrix
-  sim_rets_sp500[ ,t] <- rets1_sim
-  sim_rets_vix[ ,t] <- rets2_sim
+  sim_rets_sp500_copula[ ,t] <- rets1_sim
+  sim_rets_vix_copula[ ,t] <- rets2_sim
 }
 
 # preview of simulated log returns
-head(sim_rets_sp500)
-head(sim_rets_vix)
+head(sim_rets_sp500_copula)
+head(sim_rets_vix_copula)
 ```
 
 ### Computing Prices from Returns 
 
-Next, we create a function to forecast the 5 day ahead prices from the returns. Since: 
-
-$$
-\begin{aligned}
-R_{t} = \dfrac{P_{t} - P_{t-1}}{P_{t-1}} \\
-\implies R_{t} = \dfrac{P_{t}}{P_{t-1}} - 1 \\ 
-\implies \log(R_{t}) = \log\left( \dfrac{P_{t}}{P_{t-1}} \right) \\ 
-\implies \log(R_{t}) = \log(P_{t}) - \log(P_{t-1}) \\ 
-\implies \log(P_{t}) = \log(R_{t})+ \log(P_{t-1}) \\ 
-\implies P_{t} = \exp(\log(R_{t})+ \log(P_{t-1}) ) \\ 
-\implies P_{t+1} = \exp(\log(R_{t+1})+ \log(P_{t}) )
-\end{aligned}
-$$
-This logic is implemented in the `f_logret_to_price()` function through the `f_next_Pt()` function, under the `code/Utils.R` script. 
-
+See: `code/Utils.R`.
 
 ```{r}
-# Obtain Initial values (last value of simulation) 
+# Obtain Initial values (last value of indexes) 
 spT <- sp500[length(sp500)][[1]]
 vixT <- vix[length(vix)][[1]]
 
 # calculate the price and values from the simulated log-returns 
-sim_val_mats <- f_logret_to_price(sp_init = spT,
+sim_val_mats_copula <- f_logret_to_price(sp_init = spT,
                                   vix_init = vixT, 
-                                  sim_rets_sp500 = sim_rets_sp500, 
-                                  sim_rets_vix = sim_rets_vix, 
-                                  n_ahead = n_ahead
+                                  sim_rets_sp500 = sim_rets_sp500_copula, 
+                                  sim_rets_vix = sim_rets_vix_copula
                                   )
 
 # unpack matrices 
-sim_price_sp500 <- sim_val_mats$sp500 
-sim_vol_vix <- sim_val_mats$vix
+sim_price_sp500_copula <- sim_val_mats_copula$sp500 
+sim_vol_vix_copula <- sim_val_mats_copula$vix
 ```
 
 
 ```{r}
 # compare simulated returns with the price
-head(sim_rets_sp500)
-head(sim_price_sp500) 
+head(sim_rets_sp500_copula)
+head(sim_price_sp500_copula) 
 ```
 
 ```{r}
 # compare simualted log rets with volatility 
-head(sim_rets_vix)
-head(sim_vol_vix)
+head(sim_rets_vix_copula)
+head(sim_vol_vix_copula)
 ```
 
 ```{r}
 # save data from the simulated values 
-save(sim_price_sp500, file=here("data_out", "sim_vol_sp500_student_copula.rda"))
-save(sim_vol_vix, file=here("data_out", "sim_vol_vix_student_copula.rda"))
+save(sim_price_sp500_copula, file=here("data_out", "sim_vol_sp500_student_copula.rda"))
+save(sim_vol_vix_copula, file=here("data_out", "sim_vol_vix_student_copula.rda"))
 ```
 
 
@@ -694,16 +1167,12 @@ Next, we calculate the price of the book of options for the simulated values usi
 # random seed for replication 
 set.seed(123)
 
-# Initialize strikes and maturities the options 
-T_vec <- c(20, 20, 40,40) #  maturities 
-K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
-
 # Obtain the obtion prices from simulation values 
-opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500, 
-                                         sim_vol_vix = sim_vol_vix, 
-                                         K_vec = K_vec, 
-                                         T_vec = T_vec, 
-                                         put=FALSE)
+opt_price_mats_copula <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500_copula, 
+                                                 sim_vol_vix = sim_vol_vix_copula, 
+                                                 K_vec = option_book$K, 
+                                                 T_vec = option_book$T, 
+                                                 put=FALSE)
 
 ```
 
@@ -711,37 +1180,13 @@ opt_price_mats <- f_opt_price_simulation(sim_price_sp500 = sim_price_sp500,
 
 ```{r}
 # overview of dataframes
-head(opt_price_mats$opt1)
-head(opt_price_mats$opt2)
-head(opt_price_mats$opt3)
-head(opt_price_mats$opt4)
+head(opt_price_mats_copula$opt1)
+head(opt_price_mats_copula$opt2)
+head(opt_price_mats_copula$opt3)
+head(opt_price_mats_copula$opt4)
 ```
 
 ### Distribution of the Profit and Loss for the Book Of Options 
-
-Recall the profit functions for European options: 
-
-### Parameters 
-
-**Parameters:** 
-- $S$: Spot price (current)
-- $S_0$: Spot price at the beginnin of the option
-- $S_T$: Spot price at maturity
-- $T$: Maturity of option
-- $K$: Strike price
-- $c$: Price of Call option
-- $p$: Price of Put option
-
-### Profit at Maturity
-
-The profit functions of a long call and a long put are given by: 
-
-$$
-\begin{aligned}
-\pi^{\text{Long Call}} = \max(S_T - K, 0) - c \\ 
-\pi^{\text{Long Put}} = \max(K - S_T, 0) - p
-\end{aligned}
-$$
 
 
 **Calculating the profits** 
@@ -750,24 +1195,20 @@ For each of the simulated prices and resulting premiums, we want to calculate th
 The function used is `f_pl_simulation()`, found under `code/OptionPricing.R`. 
 
 ```{r}
-# Initialize strikes and maturities the options 
-T_vec <- c(20, 20, 40,40) #  maturities 
-K_vec <- c(1600, 1650, 1750, 1800) # Strikes 
-
 # Compute the profits and loses for the simulation  from the simulated option premiums
-PL_mats <- f_pl_simulation(sim_price_sp500 = sim_price_sp500, 
-                           opt_price_mats = opt_price_mats, 
-                           K_vec = K_vec)
+PL_mats_copula <- f_pl_simulation(sim_price_sp500 = sim_price_sp500_copula, 
+                                  opt_price_mats = opt_price_mats_copula, 
+                                  K_vec = option_book$K)
 
 ```
 
 
 ```{r}
 # display profit matrices 
-head(PL_mats$PL1)
-head(PL_mats$PL2)
-head(PL_mats$PL3)
-head(PL_mats$PL4)
+head(PL_mats_copula$PL1)
+head(PL_mats_copula$PL2)
+head(PL_mats_copula$PL3)
+head(PL_mats_copula$PL4)
 ```
 
 **Distribution of Options P/L** 
@@ -776,48 +1217,51 @@ Next, using all the simulated profits and losses for each of the options, we dis
 
 ```{r fig.height=9, fig.width=11, fig.align='center'}
 # flatten the matrices 5-days ahead simulated P/L for the three options 
-sim_pl_opt1 <- as.vector(PL_mats$PL1)
-sim_pl_opt2 <- as.vector(PL_mats$PL2)
-sim_pl_opt3 <- as.vector(PL_mats$PL3)
-sim_pl_opt4 <- as.vector(PL_mats$PL4)
+sim_pl_opt1_copula <- as.vector(PL_mats_copula$PL1)
+sim_pl_opt2_copula <- as.vector(PL_mats_copula$PL2)
+sim_pl_opt3_copula <- as.vector(PL_mats_copula$PL3)
+sim_pl_opt4_copula <- as.vector(PL_mats_copula$PL4)
 
 # Compute the 95% VaR and 95% ES
-opt1_VaR_ES <- f_VaR_ES(sim_pl_opt1, alpha = 0.05)
-opt2_VaR_ES <- f_VaR_ES(sim_pl_opt2, alpha = 0.05)
-opt3_VaR_ES <- f_VaR_ES(sim_pl_opt3, alpha = 0.05)
-opt4_VaR_ES <- f_VaR_ES(sim_pl_opt4, alpha = 0.05)
+opt1_copula_VaR_ES <- f_VaR_ES(sim_pl_opt1_copula, alpha = 0.05)
+opt2_copula_VaR_ES <- f_VaR_ES(sim_pl_opt2_copula, alpha = 0.05)
+opt3_copula_VaR_ES <- f_VaR_ES(sim_pl_opt3_copula, alpha = 0.05)
+opt4_copula_VaR_ES <- f_VaR_ES(sim_pl_opt4_copula, alpha = 0.05)
+
+# plotting grid
+par(mfrow = c(2,2))
 
 # plot the distribution for each of the options 
-par(mfrow = c(2,2))
-hist(sim_pl_opt1, nclass = round(10 * log(n_sim)), 
+hist(sim_pl_opt1_copula, nclass = round(10 * log(n_sim)), 
      probability = TRUE, xlab=paste0("K=", K_vec[1], " T=", T_vec[1], " (Call)"))
-lines(density(sim_pl_opt1), lwd=2, col="blue")
-abline(v=opt1_VaR_ES$VaR, col="red") # 95% VaR
-abline(v=opt1_VaR_ES$ES, col="black") # expected shortfall 
-rug(sim_pl_opt1)
+lines(density(sim_pl_opt1_copula), lwd=2, col="blue")
+abline(v=opt1_copula_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt1_copula_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt1_copula)
 
-
-hist(sim_pl_opt2, nclass = round(10 * log(n_sim)), 
+# plot the distribution for each of the options 
+hist(sim_pl_opt2_copula, nclass = round(10 * log(n_sim)), 
      probability = TRUE, xlab=paste0("K=", K_vec[2], " T=", T_vec[2], " (Call)"))
-lines(density(sim_pl_opt2), lwd=2, col="blue")
-abline(v=opt2_VaR_ES$VaR, col="red") # 95% VaR
-abline(v=opt2_VaR_ES$ES, col="black") # expected shortfall 
-rug(sim_pl_opt2)
+lines(density(sim_pl_opt2_copula), lwd=2, col="blue")
+abline(v=opt2_copula_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt2_copula_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt2_copula)
 
-
-hist(sim_pl_opt3, nclass = round(10 * log(n_sim)), 
+# plot the distribution for each of the options 
+hist(sim_pl_opt3_copula, nclass = round(10 * log(n_sim)), 
      probability = TRUE, xlab=paste0("K=", K_vec[3], " T=", T_vec[3], " (Call)"))
-lines(density(sim_pl_opt3), lwd=2, col="blue")
-abline(v=opt3_VaR_ES$VaR, col="red") # 95% VaR
-abline(v=opt3_VaR_ES$ES, col="black") # expected shortfall 
-rug(sim_pl_opt3)
+lines(density(sim_pl_opt3_copula), lwd=2, col="blue")
+abline(v=opt3_copula_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt3_copula_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt3_copula)
 
-hist(sim_pl_opt4, nclass = round(10 * log(n_sim)), 
+# plot the distribution for each of the options 
+hist(sim_pl_opt4_copula, nclass = round(10 * log(n_sim)), 
      probability = TRUE, xlab=paste0("K=", K_vec[4], " T=", T_vec[4], " (Call)"))
-lines(density(sim_pl_opt4), lwd=2, col="blue")
-abline(v=opt4_VaR_ES$VaR, col="red") # 95% VaR
-abline(v=opt4_VaR_ES$ES, col="black") # expected shortfall 
-rug(sim_pl_opt4)
+lines(density(sim_pl_opt4_copula), lwd=2, col="blue")
+abline(v=opt4_copula_VaR_ES$VaR, col="red") # 95% VaR
+abline(v=opt4_copula_VaR_ES$ES, col="black") # expected shortfall 
+rug(sim_pl_opt4_copula)
 ```
 
 These all look like multimodal distributions. The last one, particularly shows a different mode for each of the fives days computed. The 95% VaR (red) and ES (black) are all displayed in the plots. 
@@ -825,42 +1269,145 @@ These all look like multimodal distributions. The last one, particularly shows a
 
 ### VaR95
 
-**Definition** 
-
-For a random variable $X$, the **Value-at-Risk (VaR)** at level $\alpha$ is defined as the $\alpha$-lower quantile of the distribution of X, thus: 
-$$
-VaR_X(\alpha) = F^{-1}_{X}(1 - \alpha)
-$$
-
-**First Option** 
-
 ```{r}
-opt1_VaR_ES$VaR # first option 
-opt2_VaR_ES$VaR # second doption 
-opt3_VaR_ES$VaR # third option
-opt4_VaR_ES$VaR # fourth option
+opt1_copula_VaR_ES$VaR # first option 
+opt2_copula_VaR_ES$VaR # second doption 
+opt3_copula_VaR_ES$VaR # third option
+opt4_copula_VaR_ES$VaR # fourth option
 ```
-## ES95 
 
-Expected shortfall is calculated by averaging all of the returns in the distribution that are worse than the VAR of the portfolio at a given level of confidence.
+### ES95
 
 ```{r}
 # display 
-opt1_VaR_ES$ES
-opt2_VaR_ES$ES
-opt3_VaR_ES$ES
-opt4_VaR_ES$ES
+opt1_copula_VaR_ES$ES
+opt2_copula_VaR_ES$ES
+opt3_copula_VaR_ES$ES
+opt4_copula_VaR_ES$ES
 ```
 
 
 \newpage
 # Volatility Surface 
 
+Steps: 
+
+1.Fit a volatility surface to the implied volatilities observed on the market (traded call and put options).Minimize the absolute distance between the market implied volatilities and the model implied volatilities. The parametric surface is given by:
+
+$$
+  \sigma(m,\tau) = \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}, 
+$$
+
+where: 
+- $m=K/S$ is the **monyness**.
+- $\tau$ is the time to maturity of the option in years. 
+- $\alpha_1, \dots, \alpha_4$ are model parameters.
+
+2. Re-price the portfolio in one week assuming the same parametric model but shifted by the one-year ATM implied volatility difference.
+  
+**Note:** ATM means at-the-money, which means that $m=1$. Assume that the one-year ATM implied volatility given by the VIX is $(\alpha_1 + \alpha_4)$. 
+
+## Traded Options data 
+
+First, we do some data preparation with the traded options available. Since for $K > S$ a put option has zero profit (don't want to exercise at a higher price), we discard values with $m > 1$, and similarly for call options with $m < 1$. 
+
 ```{r}
-#########################################################
-###  ---> INSERT YOUR PART FROM HERE (ALESSIO) <---- ###
-############################################## #########
+#initialize the last price of the underlying
+S <- Market$sp500[length(Market$sp500)][[1]] #3410
+VIX <- as.numeric(Market$vix[length(Market$vix)])
+
+# convert to draframe for easier manipulation 
+calls_df <- as.data.frame(calls)
+puts_df <- as.data.frame(puts)
+
+# assign extra column to puts (1) and calls (0)
+calls_df["type"] <- "call"
+puts_df["type"] <- "put"
+
+# check dimensions 
+dim(calls_df) 
+dim(puts_df)
+
+# stack both of these matrices together 
+puts_calls <- rbind(calls_df, puts_df) 
+
+# integrate the price 
+puts_calls["S"] <- rep(S, nrow(puts_calls))
+puts_calls["m"] <- puts_calls["K"]/puts_calls["S"]
+
+# filter the calls that have moniness over one 
+calls_m_over <- puts_calls[(puts_calls["type"] == "call") & (puts_calls["m"] >= 1), ]
+
+# filter the puts that have moniness below one
+puts_m_under <- puts_calls[(puts_calls["type"] == "put") & (puts_calls["m"] < 1), ]
+
+# combine these results into putcalls again 
+call_put_data <- rbind(calls_m_over, puts_m_under)
 ```
+```{r}
+head(call_put_data)
+```
+
+```{r}
+tail(call_put_data)
+```
+
+## Fitting the volatility surface 
+
+The functions that we will use are implemented under `code/VolatilitySurface.R`. The optimization problem can be written as:
+
+$$
+  \begin{aligned}
+\overset{\rightarrow}{\alpha}^{*} &=  \underset{\overset{\rightarrow}{\alpha}}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - \sigma(m .\tau)\right| \\ 
+&= \underset{\alpha_1, \alpha_2, \alpha_3, \alpha_4}{\arg \min} \;\; \sum_{t=1}^{T} \left|\sigma_{t}^{observed} - 
+  \left( \alpha_1 + \alpha_2(m-1)^{2} + \alpha_3(m-1)^{3} + \alpha_4 \sqrt{\tau}  \right)
+\right|
+  \end{aligned}
+$$
+
+```{r}
+# Optimize the objective using available data 
+alpha <- f_sig_optim(call_put_data)
+alpha # best fitted parameters 
+```
+## Volatility Surface Plot 
+
+```{r}
+#Summary of data
+Moneyness <- call_put_data$m
+Tau <- call_put_data$tau
+
+#Initialize x and y axis
+maturity <- seq(from =0, to = 2.5, by = 0.05)
+moneyness <-  seq(from =0, to = 2, by = 0.05)
+
+# memory allocation
+IV <- matrix(NA, nrow = length(moneyness), ncol = length(maturity))
+
+# Creating (x,y,z) values for the surface
+for(i in 1:length(moneyness)){
+  for(j in 1:length(maturity)){
+    IV[i,j] <- f_sig_IV(alpha, moneyness[i], maturity[j])
+  }
+}
+
+
+# perspective plot
+persp(x = moneyness, y = maturity, z = IV,
+      xlab = "m",
+      ylab = "tau",
+      zlab = "IV",
+      main = "Fitted Volatility Surface",
+      ylim = c(0,2.5), xlim = c(0, 2), zlim = c(0,8),
+      theta = 30, phi = 30, expand = 0.5, 
+      shade=0.4, lwd=0.1, col = "yellow", 
+      tck = 1, r = 15, d = 0.5
+      )
+```
+
+## Repricing the Portfolio in on week 
+
+We are assuming the same parametric model but shifted by the VIX difference. There is a *distance* between the model and the data, we need to keep the same distance and project it forward when repricing. 
 
 
 \newpage
@@ -895,7 +1442,7 @@ head(sp500_rets)
 head(vix_rets)
 ```
 
-### GARCH(1,1) Model 
+## GARCH(1,1) Model 
 
 **Model specification**
 
@@ -1347,7 +1894,7 @@ legend(x="topleft",
 ### Transforming returns back to SP500 prices and VIX values 
 
 ```{r}
-# Obtain Initial values (last value of simulation) 
+# Obtain Initial values (last value of indexes) 
 spT <- sp500[length(sp500)][[1]]
 vixT <- vix[length(vix)][[1]]
 
@@ -1355,8 +1902,7 @@ vixT <- vix[length(vix)][[1]]
 sim_val_mats_full <- f_logret_to_price(sp_init = spT,
                                       vix_init = vixT, 
                                       sim_rets_sp500 = sp500_sim_rets_full, 
-                                      sim_rets_vix = vix_sim_rets_full, 
-                                      n_ahead = n_ahead
+                                      sim_rets_vix = vix_sim_rets_full
                                       )
 
 # unpack matrices 
@@ -1383,8 +1929,9 @@ head(vix_sim_vol_full)
 Recall the initial (call) options: 
 
 1. **1x** strike $K=1600$ with maturity $T=20d$ 
-2. **1x** strike $K=1605$ with maturity $T=40d$
-3. **1x** strike $K=1800$ with maturity $T=40d$ 
+2. **1x** strike $K=1650$ with maturity $T=20d$
+3. **1x** strike $K=1750$ with maturity $T=40d$ 
+2. **1x** strike $K=1800$ with maturity $T=40d$
 
 **Option Pricing of Simulated Values**
 
@@ -1499,6 +2046,25 @@ abline(v=opt4_full_VaR_ES$ES, col="black") # expected shortfall
 rug(sim_pl_opt4_full)
 ```
 
+### VaR95
+
+```{r}
+opt1_full_VaR_ES$VaR # first option 
+opt2_full_VaR_ES$VaR # second doption 
+opt3_full_VaR_ES$VaR # third option
+opt4_full_VaR_ES$VaR # fourth option
+```
+### ES95 
+
+Expected shortfall is calculated by averaging all of the returns in the distribution that are worse than the VAR of the portfolio at a given level of confidence.
+
+```{r}
+# display 
+opt1_full_VaR_ES$ES
+opt2_full_VaR_ES$ES
+opt3_full_VaR_ES$ES
+opt4_full_VaR_ES$ES
+```
 
 
 

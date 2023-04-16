@@ -43,7 +43,7 @@ options("scipen" = 10)
 
 ### Libraries 
 
-```{r, message=FALSE, echo=FALSE}
+```{r, message=FALSE, warning=FALSE}
 # Preload R libraries we will use 
 library("here")
 library("xts") 
@@ -2065,9 +2065,5 @@ opt2_full_VaR_ES$ES
 opt3_full_VaR_ES$ES
 opt4_full_VaR_ES$ES
 ```
-
-
-
-
 
 
