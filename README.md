@@ -1,4 +1,4 @@
-# Stats Methods for Financial Data - Project 2: Risk & Financial Management
+# Stats Methods for Financial Data - Project 2: Risk Management
 
 ## SP500 vs VIX
 ![](img/sp500_vs_vix.jpg)
