@@ -1,5 +1,10 @@
 # Stats Methods for Financial Data - Project 2: Risk Management
 
+### Authors
+- Hair Parra 
+- Alessio Bressan 
+- Ioan Catalin
+
 ## SP500 vs VIX
 ![](img/sp500_vs_vix.jpg)
 
@@ -11,3 +16,5 @@
 
 ## Volatility Surface
 ![](img/volatility_surface.jpg)
+
+(C) 2023
