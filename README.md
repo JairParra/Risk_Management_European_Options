@@ -1,4 +1,5 @@
-# Stats Methods for Financial Data - Project 2: Risk Management
+# Stats Methods for Financial Data (HEC Montreal) - Project 2: Risk Management
+# European Book of Options on the SP500 
 
 ### Authors
 - Hair Parra 
