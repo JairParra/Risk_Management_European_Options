@@ -996,21 +996,27 @@ sigma
 ### Fitting Student-t to the marginals 
 
 ```{r}
-## Fit marginals by MLE
+## Functions to optimize marginals fits by MLE, but fixing the degrees of freedom 
+f_t_optim1 <- function(x, mean, sd){
+  dstd(x, mean=mean, sd=sd, nu=10) # nu is fixed!
+}
+f_t_optim2 <- function(x, mean, sd){
+  dstd(x, mean=mean, sd=sd, nu=5)
+}
 
 # Student-t for sp500
 fit1 <- suppressWarnings(
   fitdistr(x = sp500_rets_vec, 
-           densfun = dstd,
-           start = list(mean = 0, sd = 1, nu = 10))
+           densfun = f_t_optim1,
+           start = list(mean = 0, sd = 1))
   )
 theta1 <- fit1$estimate #extract fitted parameters
 
 # Student-t for vix
 fit2 <- suppressWarnings(
   fitdistr(x = vix_rets_vec, 
-           densfun = dstd,
-           start = list(mean = 0, sd = 1, nu = 5))
+           densfun = f_t_optim2,
+           start = list(mean = 0, sd = 1))
   )
 theta2 <- fit2$estimate # extract fitted parameters
 
@@ -1018,6 +1024,7 @@ theta2 <- fit2$estimate # extract fitted parameters
 theta1
 theta2
 ```
+
 
 ```{r}
 # Fit Student-t to the marginals
