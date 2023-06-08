@@ -1,4 +1,4 @@
-## Risk Management: European Book of Options on the SP500 
+# Risk Management: European Book of Options on the SP500 
 ## Stats Methods for Financial Data (HEC Montreal) - Project 2
 
 ### Authors
